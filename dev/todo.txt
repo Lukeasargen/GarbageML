@@ -1,0 +1,20 @@
+
+evaluation notebook
+
+confusion matrix
+
+accuracy by class
+precision by class
+recall by class
+f1 by class
+
+
+curves, per class or average?
+precision recall curve
+roc curve
+
+roc auc, any good for multiclass?
+
+
+
+
