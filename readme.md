@@ -29,7 +29,7 @@ Requirements
 pip install -r requirements.txt
 ```
 
-Sometimes pytorch-lightning didn't work, so try these pip arguments.
+Sometimes pytorch-lightning didn't install, so try these pip arguments.
 ```
 pip install pytorch-lightning
 pip install pytorch-lightning -U
@@ -41,9 +41,11 @@ pip install pytorch-lightning --ignore-installed dataclasses
 
 ## TrashNet
 
-I started with TrashNet (Yang and Thung, 2016) dataset. This is a pretty balanced dataset. The labels closely match the recycling bins at Penn state so I think it's decent starting point. 
+I started with TrashNet (Yang and Thung, 2016) dataset. This is a pretty balanced dataset. The labels don't match the recycling bins, but I think it's decent starting point.
 
 Dataset link: https://github.com/garythung/trashnet
+
+Stats: 2527 images, 501 glass, 594 paper, 403 cardboard, 482 plastic, 410 metal, 137 trash
 
 I downsampled the images to speed up the image loading pipeine. You can see how that is done in [resize.py](resize.py).
 
@@ -68,7 +70,7 @@ def get_model(args):
     raise ValueError("Unknown model arg: {}".format(args.model))
 ```
 
-A little trick that saves me a lot of headache is putting the normalization transform as the first layer in the model. Now I just pass in image tensors normalized to [0, 1] and don't have to worry about what normalization the model was trained on because that information is sorted in the checkpoint automatically by pytorch lightning.
+A little trick that saves me a lot of headache is putting the normalization transform as the first layer in the model. Now I just pass in image tensors normalized to [0, 1] and don't have to worry about what normalization the model was trained on because that information is stored in the checkpoint automatically by pytorch lightning.
 
 
 # Training
@@ -93,7 +95,7 @@ All the arguments:
 --lr=4e-3           # float, learning rate
 --momentum=0.9      # float, sgd with momentum
 --nesterov          # store_true, sgd with nestrov acceleration
---weight_decay=0.0  # float, weight dacy for sgd and adamw
+--weight_decay=0.0  # float, weight decay for sgd and adamw
 --accumulate=1      # int, number of gradient accumulation steps, simulate larger batches when >1
 --scheduler=None    # str, use step, plateau, or exp schedulers
 --lr_gamma=0.2      # float, multiply the learning rate by gamma on the scheduler step
@@ -104,7 +106,7 @@ All the arguments:
 This is the tensorboard accruacy graph for 2 resnet18 runs. The dark red is random sampler and the light blue is a imbalance sampler which upsamples the minority classes to make uniform labels in each batch.
 ![example](/data/readme/resnet18_acc.png)
 
-Here is the command replicate these training runs:
+Here is the command to replicate these training runs:
 ```
 # Dark red line
 python train.py --root=data/full448  --workers=6 --split=0.2 --epochs=200 --batch=32 --model=resnet18 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1
