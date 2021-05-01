@@ -1,0 +1,11 @@
+__pycache__
+*.pyc
+.ipynb_checkpoints
+
+
+/lightning_logs
+/logs*
+
+
+data/*
+!data/readme

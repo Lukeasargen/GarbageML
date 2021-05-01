@@ -1,0 +1,100 @@
+tensorboard --logdir lightning_logs/
+
+
+TODO
+cache metrics from train_epoch_end and plot in validation_epoch_end, same graph
+confusion matrix
+ROC graph
+cross validation
+
+
+python train.py
+--workers=6 --split=0.2 --epochs=100 --batch=32
+--imbalance
+--precision=16
+
+--opt=sgd --lr=1e-1 --weight_decay=5e-4 --momentum=0.9 --nesterov
+--opt=adam --lr=4e-3
+--opt=adamw --lr=4e-3 --weight_decay=5e-4
+--accumulate=1
+
+--scheduler=step --milestones 100 150 --lr_gamma=0.1
+--scheduler=exp --lr_gamma=0.95
+--scheduler=plateau --patience 10 --lr_gamma=0.8
+
+
+
+Dataset image size
+version 11 - wd=5e-4, 177 minutes
+python train.py --root data/full --workers 6 --split 0.2 --epochs 200 --batch 32 --model resnet50 --opt sgd --lr 1e-1 --weight_decay 5e-4 --momentum 0.9 --nesterov --scheduler step --milestones 100 150 --lr_gamma 0.1
+version 12 - small4, 52 minutes
+python train.py --root data/small4 --workers 6 --split 0.2 --epochs 200 --batch 32 --model resnet50 --opt sgd --lr 1e-1 --weight_decay 5e-4 --momentum 0.9 --nesterov --scheduler step --milestones 100 150 --lr_gamma 0.1
+version 13 - small2, 51 minutes
+python train.py --root data/small2 --workers 6 --split 0.2 --epochs 200 --batch 32 --model resnet50 --opt sgd --lr 1e-1 --weight_decay 5e-4 --momentum 0.9 --nesterov --scheduler step --milestones 100 150 --lr_gamma 0.1
+version 14 - rerun 12, not much changed
+python train.py --root data/small4 --workers 6 --split 0.2 --epochs 200 --batch 32 --model resnet50 --opt sgd --lr 1e-1 --weight_decay 5e-4 --momentum 0.9 --nesterov --scheduler step --milestones 100 150 --lr_gamma 0.1
+
+version 15 - imbalance, adamw
+python train.py --root data/small2 --imbalance --workers 6 --split 0.2 --epochs 200 --batch 32 --model resnet50 --opt adamw --lr 4e-3 --weight_decay 5e-4 --scheduler step --milestones 100 150 --lr_gamma 0.2
+version 16 - random batches
+python train.py --root data/small2 --workers 6 --split 0.2 --epochs 200 --batch 32 --model resnet50 --opt adamw --lr 4e-3 --weight_decay 5e-4 --scheduler step --milestones 100 150 --lr_gamma 0.2
+
+imbalance did not seem to help much, still test if have time in final design
+
+verions 17 - long adam run with plateau to see what when dropping the lr might help speed up experiments
+python train.py --root data/small2 --workers 6 --split 0.2 --epochs 300 --batch 32 --model resnet50 --opt adamw --lr 4e-3 --weight_decay 5e-4 --scheduler plateau --patience 30 --lr_gamma 0.5
+
+version 18 - step learning rate near the end to clip the larger gradients
+python train.py --root data/small2 --workers 6 --split 0.2 --epochs 200 --batch 32 --model resnet50 --opt adamw --lr 4e-3 --weight_decay 5e-4 --scheduler step --milestones 150 190 --lr_gamma 0.1
+
+redo resize
+
+verion 19 - 18 but w resnet34
+python train.py --root data/full448 --workers 6 --split 0.2 --epochs 200 --batch 32 --model resnet34 --opt adamw --lr 4e-3 --weight_decay 5e-4 --scheduler step --milestones 150 190 --lr_gamma 0.1
+verion 20 - 18 but w resnet18
+python train.py --root data/full448 --workers 6 --split 0.2 --epochs 200 --batch 32 --model resnet18 --opt adamw --lr 4e-3 --weight_decay 5e-4 --scheduler step --milestones 150 190 --lr_gamma 0.1
+
+use resnet18
+
+version 21 - 20 but imbalance
+python train.py --root data/full448 --imbalance --workers 6 --split 0.2 --epochs 200 --batch 32 --model resnet18 --opt adamw --lr 4e-3 --weight_decay 5e-4 --scheduler step --milestones 150 190 --lr_gamma 0.1
+
+
+version 22 - densenet121
+python train.py --root=data/full448 --imbalance --workers=6 --split=0.2 --epochs=200 --batch=32 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=densenet121
+
+version 23
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=64 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=resnet18
+
+CHANGE TO NORMALIZE LAYER
+
+version 0 - batch 16
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=16 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=resnet18
+version 1 - batch 32
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=32 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=resnet18
+version 2 - batch 64
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=64 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=resnet18
+
+version 3 - mobilenet_v3_small
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=32 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=mobilenet_v3_small
+verion 4 - mobilenet_v3_large
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=32 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=mobilenet_v3_large
+version 5 - mobilenet_v2
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=32 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=mobilenet_v2
+version 6 - shufflenet_v2_x0_5
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=32 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=shufflenet_v2_x0_5
+version 7 - shufflenet_v2_x1_0
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=32 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=shufflenet_v2_x1_0
+version 8 - shufflenet_v2_x1_5
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=32 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=shufflenet_v2_x1_5
+version 9 - shufflenet_v2_x2_0
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=32 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=shufflenet_v2_x2_0
+
+these are great
+mobilenet_v3_small
+shufflenet_v2_x1_0
+shufflenet_v2_x1_5
+
+
+
+
