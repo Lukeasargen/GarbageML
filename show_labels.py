@@ -9,12 +9,12 @@ from model import GarbageModel
 from util import pil_loader, prepare_image
 
 
-root = "data/test448"
+root = "data/subset"
 rows = 3
 cols = 4
 scale = 2.5
 
-model_path = "lightning_logs/version_9/checkpoints/epoch=199-step=11799.ckpt"
+model_path = "lightning_logs/version_7/checkpoints/epoch=199-step=11799.ckpt"
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print("Device : {}".format(device))
@@ -50,8 +50,8 @@ for i in range(1, cols*rows+1):
 
     ax = fig.add_subplot(rows, cols, i)
     ax.imshow(img_color)
-    color = "g" if int(y)==int(yhat) else "r"
-    title_str = "{} ({:.02f} % {})".format(classes[int(y)], float(100*yprob), classes[int(yhat)])
+    color = "g" if sample_ds.classes[int(y)]==classes[int(yhat)] else "r"
+    title_str = "{} ({:.02f} % {})".format(sample_ds.classes[int(y)], float(100*yprob), classes[int(yhat)])
     ax.set_title(title_str, color=color)
 
 

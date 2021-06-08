@@ -16,13 +16,16 @@ def get_args():
     parser = argparse.ArgumentParser()
     # Init and setup
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--root', default='data/full', type=str)
-    parser.add_argument('--workers', default=4, type=int)
+    parser.add_argument('--root', type=str, required=True)
+    parser.add_argument('--workers', default=0, type=int)
     parser.add_argument('--ngpu', default=1, type=int)
     parser.add_argument('--benchmark', default=False, action='store_true')
     parser.add_argument('--imbalance', default=False, action='store_true')
+    parser.add_argument('--mean', nargs=3, default=[0.485, 0.456, 0.406], type=float)
+    parser.add_argument('--std', nargs=3, default=[0.229, 0.224, 0.225], type=float)
+    parser.add_argument('--cutmix', default=0, type=float)
     # Model parameters
-    parser.add_argument('--model', default='resnet18', type=str)
+    parser.add_argument('--model', default='shufflenet_v2_x1_0', type=str)
     parser.add_argument('--input_size', default=224, type=int)
     # Training Hyperparamters
     parser.add_argument('--batch', default=16, type=int)
@@ -49,8 +52,6 @@ def main(args):
     pl.seed_everything(args.seed)
 
     # Setup transforms
-    args.mean = [0.485, 0.456, 0.406]
-    args.std = [0.229, 0.224, 0.225]
     valid_transform = T.Compose([
         T.Resize(args.input_size),
         T.CenterCrop(args.input_size),
@@ -85,7 +86,7 @@ def main(args):
         train_sampler = ImbalancedSampler(train_ds, train_idx)
     else:
         train_sampler = SubsetRandomSampler(train_idx)
-    val_sampler = SubsetRandomSampler(val_idx)  # Remains unbalanced to match the input distribution
+    val_sampler = SubsetRandomSampler(val_idx)
 
     # Check if the batches are balanced-ish
     counts = [0]*len(train_ds.classes)
@@ -115,7 +116,7 @@ def main(args):
         deterministic=True,  # cudnn.deterministic
         gpus=args.ngpu,
         precision=args.precision,
-        progress_bar_refresh_rate=20,
+        progress_bar_refresh_rate=10,
         max_epochs=args.epochs,
     )
 

@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -31,8 +32,28 @@ class GarbageModel(pl.LightningModule):
     def batch_step(self, batch):
         """ Used in train and validation """
         data, target = batch
-        logits = self.model(data)
-        loss = F.cross_entropy(logits, target)
+        if self.hparams.cutmix>0 and self.training:
+            lam = np.random.beta(self.hparams.cutmix, self.hparams.cutmix)
+            rand_index = torch.randperm(data.size()[0]).to(data.device)
+            target_a = target
+            target_b = target[rand_index]
+            # Now the bboxes for the input and mask
+            _, _, w, h = data.size()
+            cut_rat = np.sqrt(1.0 - lam)
+            cut_w, cut_h = int(w*cut_rat), int(h*cut_rat)  # Box size
+            cx, cy = np.random.randint(w), np.random.randint(h)  # Box center
+            bbx1 = np.clip(cx - cut_w // 2, 0, w)
+            bbx2 = np.clip(cx + cut_w // 2, 0, w)
+            bby1 = np.clip(cy - cut_h // 2, 0, h)
+            bby2 = np.clip(cy + cut_h // 2, 0, h)
+            data[:, :, bbx1:bbx2, bby1:bby2] = data[rand_index, :, bbx1:bbx2, bby1:bby2]
+            # Adjust the classification loss based on pixel area ratio
+            lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (w*h))
+            logits = self.model(data)
+            loss = F.cross_entropy(logits, target_a)*lam + F.cross_entropy(logits, target_b)*(1.0-lam)
+        else:
+            logits = self.model(data)
+            loss = F.cross_entropy(logits, target)
         # Metrics
         pred = torch.argmax(logits, dim=1)
         acc = accuracy(pred, target)

@@ -16,6 +16,9 @@ https://github.com/PyTorchLightning/pytorch-lightning
 Create a new conda environment
 ```
 conda create --name pytorch
+```
+
+```
 conda activate pytorch
 ```
 
@@ -80,11 +83,13 @@ The final output of the model goes through a softmax so cross entropy loss is us
 All the arguments:
 ```
 --seed=42           # int, deterministic seed, cudnn.deterministic is always set True by deafult
---root=data/full    # str, ImageFolder root
---workers=4         # int, Dataloader num_workers, good practice is to use number of cpu cores or less
+--root=data/full    # str, ImageFolder root, REQUIRED
+--workers=0         # int, Dataloader num_workers, good practice is to use number of cpu cores or less
 --ngpu=1            # int, number of gpus to train on
 --benchmark         # store_true, set cudnn.benchmark
 --imbalance         # store_true, use my imbalance sampler
+--mean=[]           # float, dataset mean, default is imagenet [0.485, 0.456, 0.406]
+--std=[]            # float, dataset std, default is imagenet [0.229, 0.224, 0.225]
 --model=resnet18    # str, torchvision model name
 --input_size=224    # int, input square size in pixels
 --batch=16          # int, batch size
@@ -107,10 +112,15 @@ This is the tensorboard accruacy graph for 2 resnet18 runs. The dark red is rand
 ![example](/data/readme/resnet18_acc.png)
 
 Here is the command to replicate these training runs:
+
+Dark red line:
 ```
-# Dark red line
 python train.py --root=data/full448  --workers=6 --split=0.2 --epochs=200 --batch=32 --model=resnet18 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1
-# Light blue line, add --imbalance
+```
+
+Light blue line, add --imbalance:
+```
+python train.py --root=data/full448  --workers=6 --split=0.2 --epochs=200 --batch=32 --model=resnet18 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --imbalance
 ```
 
 The imbalance sampling seemed to underperform, but that's complete speculation. But I don't have a statistical sample of runs, just these 2 runs here.
