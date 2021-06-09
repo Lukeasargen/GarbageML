@@ -3,47 +3,12 @@ import glob
 import time
 
 import torch
-import torch.nn as nn
 from shutil import copyfile, move
 
 from model import GarbageModel
-from util import pil_loader, prepare_image
+from util import pil_loader, prepare_image, make_ensemble
 
 
-class EnsembleModel(nn.Module):
-    def __init__(self, models, input_size, classes):
-        super(EnsembleModel, self).__init__()
-        self.models = models
-        self.input_size = input_size
-        self.classes = classes
-
-    def forward(self, x):
-        predictions = [m(x) for m in self.models]
-        return torch.mean(torch.stack(predictions), dim=0)
-
-
-def make_ensemble(paths, device):
-    print(" * Loading ensemble ...")
-    # Load ensemble
-    emodels = []
-    for i in range(len(paths)):
-        m = GarbageModel.load_from_checkpoint(paths[i], map_location=device)
-        m.eval()
-        m.freeze()
-        if i==0:
-            print("Categories :", m.hparams.classes)
-            classes = m.hparams.classes
-            input_size = m.hparams.input_size
-        if classes == m.hparams.classes and input_size == m.hparams.input_size:
-            print("Adding {}".format(paths[i]))
-            m.to(device)
-            emodels.append(m.model)
-        else:
-            print("Categories do not match : {}".format(paths[i]))
-    print("Input Size :", input_size)
-    model = EnsembleModel(emodels, input_size, classes)
-    print(" * Ensemble loaded.")
-    return model
 
 
 def sort_folder(model, device, root, num=None):
@@ -82,7 +47,7 @@ def sort_folder(model, device, root, num=None):
             est = t2/count * (max_count-count)
             print("{}/{} images. {:.2f} seconds. {:.2f} images per seconds. {:.2f} seconds remaining.".format(count, max_count, t2, rate, est))
     print("Labels per class :", counts)
-    # print("Distribution of Labels:", [x / max_count for x in counts])
+    print("Distribution :", [c/sum(counts) for c in counts])
     duration = time.time() - start_time
     print(" * Sort Complete")
     print(" * Duration {:.2f} Seconds".format(duration))
@@ -95,12 +60,13 @@ if __name__ == "__main__":
     num = 1000
 
     model_paths = [
-        "lightning_logs/version_24/checkpoints/epoch=19-step=599.ckpt",
+        # "lightning_logs/version_2/checkpoints/epoch=199-step=11799.ckpt",
+        "lightning_logs/version_3/checkpoints/epoch=199-step=5999.ckpt",
         ]
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print("Device : {}".format(device))
 
-    model = make_ensemble(model_paths, device)
+    model = make_ensemble(model_paths, GarbageModel, device)
 
     sort_folder(model, device, root, num)

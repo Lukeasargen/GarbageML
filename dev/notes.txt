@@ -101,5 +101,22 @@ version 2 - cutmix=1.0
 python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=32 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=shufflenet_v2_x1_0 --cutmix=1.0
 version 3 - cutmix=1.0, batch=64
 python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=64 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=shufflenet_v2_x1_0 --cutmix=1.0
+version 4 - cutmix=1.0, batch=128
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=128 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=shufflenet_v2_x1_0 --cutmix=1.0
+version 5 - cutmix=1.0, batch=256
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=256 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=shufflenet_v2_x1_0 --cutmix=1.0
+version 6 - no cutmix, batch=256
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=256 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=shufflenet_v2_x1_0
+version 7 - cutmix=2.0, batch=256
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=256 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --model=shufflenet_v2_x1_0 --cutmix=2.0
+
+version 8 - sgd
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=256 --opt=sgd --lr=1e-1 --weight_decay=5e-4 --momentum=0.9 --nesterov --scheduler=step --milestones 75 150 190 --lr_gamma=0.1 --model=shufflenet_v2_x1_0
+
+version 9 - batch=128, lr=4e-2
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=128 --opt=adamw --lr=4e-2 --weight_decay=5e-4 --scheduler=step --milestones 100 150 --lr_gamma=0.1 --model=shufflenet_v2_x1_0
+
+version 10 - exp
+python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=128 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=exp --lr_gamma=0.978 --model=shufflenet_v2_x1_0
 
 

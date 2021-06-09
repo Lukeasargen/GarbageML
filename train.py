@@ -12,6 +12,7 @@ from model import GarbageModel
 from imbalance import ImbalancedSampler
 from util import AddGaussianNoise
 
+
 def get_args():
     parser = argparse.ArgumentParser()
     # Init and setup
@@ -89,12 +90,12 @@ def main(args):
     val_sampler = SubsetRandomSampler(val_idx)
 
     # Check if the batches are balanced-ish
-    counts = [0]*len(train_ds.classes)
-    for j in range(10):
-        for i in train_sampler:
-            l = train_ds.targets[i]
-            counts[l] += 1
-    print("Counts :", counts)
+    # counts = [0]*len(train_ds.classes)
+    # for j in range(10):
+    #     for i in train_sampler:
+    #         l = train_ds.targets[i]
+    #         counts[l] += 1
+    # print("Counts :", counts)
 
     train_loader = DataLoader(dataset=train_ds, batch_size=args.batch, sampler=train_sampler,
             num_workers=args.workers, persistent_workers=(True if args.workers > 0 else False),
