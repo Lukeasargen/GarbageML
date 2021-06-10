@@ -3,12 +3,11 @@ import glob
 import time
 
 import torch
+from torchvision import transforms as T
 from shutil import copyfile, move
 
 from model import GarbageModel
 from util import pil_loader, prepare_image, make_ensemble
-
-
 
 
 def sort_folder(model, device, root, num=None):
@@ -28,12 +27,26 @@ def sort_folder(model, device, root, num=None):
     max_count = min(num, len(images))
     print(" * Sorting {} ...".format(max_count))
     counts = [0]*len(model.classes)
+    valid_transform = T.Compose([
+        T.Resize(model.input_size),
+        T.FiveCrop(model.input_size),
+        # T.TenCrop(model.input_size),
+        T.Lambda(lambda crops: torch.stack([T.ToTensor()(crop) for crop in crops])),
+    ])
     start_time = time.time()
     for i in range(max_count):
         img_color = pil_loader(images[i])
-        img = prepare_image(img_color, model.input_size).to(device)
+
+        # img = prepare_image(img_color, model.input_size).to(device)
+
+        img = valid_transform(img_color).to(device)
+        ncrops, c, h, w = img.size()
+        img = img.view(-1, c, h, w)
+
         yclass = model(img)
-        class_prob, class_num = torch.max(yclass, dim=1)
+        yclass = yclass.view(ncrops, -1).mean(0)
+
+        class_prob, class_num = torch.max(yclass, dim=0)
         counts[int(class_num)] += 1
         try:
             move(images[i], class_folder_paths[int(class_num)])
@@ -62,7 +75,7 @@ if __name__ == "__main__":
     model_paths = [
         # "lightning_logs/version_2/checkpoints/epoch=199-step=11799.ckpt",
         "lightning_logs/version_3/checkpoints/epoch=199-step=5999.ckpt",
-        ]
+    ]
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print("Device : {}".format(device))
