@@ -39,6 +39,15 @@ pip install pytorch-lightning -U
 pip install pytorch-lightning --ignore-installed dataclasses
 ```
 
+Create the iteractive notebook kernel:
+
+```
+conda install ipykernel jupyter
+```
+
+```
+python -m ipykernel install --user --name pytorch --display-name "pytorch"
+```
 
 # Datasets
 
