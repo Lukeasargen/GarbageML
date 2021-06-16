@@ -4,6 +4,12 @@ import torchvision.transforms as T
 from PIL import Image
 
 
+def time_to_string(t):
+    if t > 3600: return "{:.2f} hours".format(t/3600)
+    if t > 60: return "{:.2f} minutes".format(t/60)
+    else: return "{:.2f} seconds".format(t)
+
+
 class AddGaussianNoise(torch.nn.Module):
     def __init__(self, std=0.01):
         self.std = std

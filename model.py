@@ -62,7 +62,7 @@ class GarbageModel(pl.LightningModule):
         weighted_f1 = f1(pred, target, num_classes=self.hparams.num_classes,
                             threshold=0.5, average="weighted")
         metrics = {
-            "loss": loss,
+            "loss": loss,  # attached to computation graph, not necessary in validation, but I'm to lazy to fix
             "accuracy": acc,
             "average_precision": avg_precision,
             "average_recall": avg_recall,
@@ -85,6 +85,7 @@ class GarbageModel(pl.LightningModule):
             self.logger.experiment.add_graph(self.model, sample)
         
         # Parameter histograms
+        # Too long to reload tensorboard, so commented out
         # for name, params in self.named_parameters():
         #     try:
         #         self.logger.experiment.add_histogram(name, params, self.current_epoch)
@@ -97,14 +98,6 @@ class GarbageModel(pl.LightningModule):
             key = "{}/train_epoch".format(k)
             val = torch.stack([x[k] for x in outputs]).mean().detach().item()
             self.logger.experiment.add_scalar(key, val, global_step=self.current_epoch)
-
-        # Step scheduler
-        if self.scheduler:
-            if type(self.scheduler) == torch.optim.lr_scheduler.ReduceLROnPlateau:
-                avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
-                self.scheduler.step(avg_loss)
-            elif type(self.scheduler) in [torch.optim.lr_scheduler.MultiStepLR, torch.optim.lr_scheduler.ExponentialLR]:
-                self.scheduler.step()
         
     def validation_step(self, batch, batch_idx):
         metrics = self.batch_step(batch)
@@ -116,10 +109,24 @@ class GarbageModel(pl.LightningModule):
             key = "{}/val_epoch".format(k)
             val = torch.stack([x[k] for x in outputs]).mean().detach().item()
             self.logger.experiment.add_scalar(key, val, global_step=self.current_epoch)
-        
+            # Use log for the checkpoint callback
+            if k=="loss":
+                avg_loss = val  # For plateau scheduler
+                self.log('val_loss', val)
+            if k=="accuracy":
+                self.log('val_accuracy', val)
+
         # Log lr
         lr = self.optimizers().param_groups[0]['lr']
         self.logger.experiment.add_scalar('Learning Rate', lr, global_step=self.current_epoch)
+
+        # Step scheduler
+        if self.scheduler:
+            if type(self.scheduler) == torch.optim.lr_scheduler.ReduceLROnPlateau:
+                self.scheduler.step(avg_loss)
+            elif type(self.scheduler) in [torch.optim.lr_scheduler.MultiStepLR, torch.optim.lr_scheduler.ExponentialLR]:
+                self.scheduler.step()
+
 
     def configure_optimizers(self):
 

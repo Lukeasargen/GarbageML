@@ -5,6 +5,8 @@ __pycache__
 
 /lightning_logs
 /logs*
+/tb_logs/*
+!/tb_logs/.keep
 
 
 data/*

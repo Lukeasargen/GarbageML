@@ -20,8 +20,10 @@ python train.py
 
 --scheduler=step --milestones 100 150 --lr_gamma=0.1
 --scheduler=exp --lr_gamma=0.95
---scheduler=plateau --patience 10 --lr_gamma=0.8
+--scheduler=plateau --plateau_patience 10 --lr_gamma=0.8
 
+--early_stop=loss
+--early_stop_patience=20
 
 
 Dataset image size

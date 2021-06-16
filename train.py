@@ -1,3 +1,4 @@
+from logging import log
 import os
 import argparse
 
@@ -7,6 +8,9 @@ from torch.utils.data.sampler import SubsetRandomSampler
 from torchvision.datasets import ImageFolder
 from torchvision import transforms as T
 import pytorch_lightning as pl
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.loggers import TensorBoardLogger
 
 from model import GarbageModel
 from imbalance import ImbalancedSampler
@@ -16,22 +20,22 @@ from util import AddGaussianNoise
 def get_args():
     parser = argparse.ArgumentParser()
     # Init and setup
-    parser.add_argument('--seed', default=42, type=int)
+    parser.add_argument('--seed', type=int)
     parser.add_argument('--root', type=str, required=True)
+    parser.add_argument('--name', default='default', type=str)
     parser.add_argument('--workers', default=0, type=int)
     parser.add_argument('--ngpu', default=1, type=int)
     parser.add_argument('--benchmark', default=False, action='store_true')
+    parser.add_argument('--precision', default=32, type=int, choices=[16, 32])
+    # Dataset
+    parser.add_argument('--batch', default=16, type=int)
+    parser.add_argument('--split', default=0.1, type=float)
     parser.add_argument('--imbalance', default=False, action='store_true')
     parser.add_argument('--mean', nargs=3, default=[0.485, 0.456, 0.406], type=float)
     parser.add_argument('--std', nargs=3, default=[0.229, 0.224, 0.225], type=float)
-    parser.add_argument('--cutmix', default=0, type=float)
     # Model parameters
-    parser.add_argument('--model', default='shufflenet_v2_x1_0', type=str)
+    parser.add_argument('--model', default='shufflenet_v2_x0_5', type=str)
     parser.add_argument('--input_size', default=224, type=int)
-    # Training Hyperparamters
-    parser.add_argument('--batch', default=16, type=int)
-    parser.add_argument('--split', default=0.1, type=float)
-    parser.add_argument('--precision', default=32, type=int, choices=[16, 32])
     # Optimizer
     parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--opt', default='adam', type=str, choices=['sgd', 'adam', 'adamw'])
@@ -44,13 +48,44 @@ def get_args():
     parser.add_argument('--scheduler', default=None, type=str, choices=['step', 'plateau', 'exp'])
     parser.add_argument('--lr_gamma', default=0.2, type=float)
     parser.add_argument('--milestones', nargs='+', default=[10, 15], type=int)
-    parser.add_argument('--patience', default=20, type=int)
+    parser.add_argument('--plateau_patience', default=20, type=int)
+    # Callbacks
+    parser.add_argument('--save_top_k', default=1, type=int)
+    parser.add_argument('--save_monitor', default='val_loss', type=str, choices=['val_loss', 'val_accuracy'])
+    parser.add_argument('--early_stop', default=None, type=str, choices=['loss', 'acc'])
+    parser.add_argument('--early_stop_patience', default=20, type=int)
+    # Augmentations
+    parser.add_argument('--cutmix', default=0, type=float)
+    parser.add_argument('--aug_scale', default=0.08, type=float)
     args = parser.parse_args()
     return args
 
 
 def main(args):
     pl.seed_everything(args.seed)
+
+    # Increment to find the next availble name
+    logger = TensorBoardLogger(save_dir="logs", name=args.name)    
+    dirpath = f"logs/{args.name}/version_{logger.version}"
+    if not os.path.exists(dirpath):
+        os.makedirs(dirpath)
+    
+    callbacks = [
+        ModelCheckpoint(
+            monitor=args.save_monitor,
+            dirpath=dirpath,
+            filename='{epoch:d}-{step}-{val_accuracy:.4f}',
+            save_top_k=args.save_top_k,
+            mode='min' if args.save_monitor=='val_loss' else 'max',
+            period=1,  # Check every validation epoch
+            save_last=True,
+        )
+    ]
+
+    if args.early_stop == 'acc':
+        callbacks.append(EarlyStopping(monitor='val_accuracy', patience=args.early_stop_patience, mode='max'))
+    if args.early_stop == 'loss':
+        callbacks.append(EarlyStopping(monitor='val_loss', patience=args.early_stop_patience, mode='min'))
 
     # Setup transforms
     valid_transform = T.Compose([
@@ -59,15 +94,15 @@ def main(args):
         T.ToTensor(),
     ])
     train_transform = T.Compose([
-        T.RandomResizedCrop(args.input_size, scale=(0.08, 1.0)),
+        T.RandomResizedCrop(args.input_size, scale=(args.aug_scale, 1.0)),
         T.RandomChoice([
             T.RandomPerspective(distortion_scale=0.5, p=1),
             T.RandomAffine(degrees=10, shear=15),
-            T.RandomRotation(degrees=30)
+            T.RandomRotation(degrees=15)
         ]),
         T.ColorJitter(brightness=0.16, contrast=0.15, saturation=0.5, hue=0.04),
         T.RandomHorizontalFlip(),
-        T.RandomVerticalFlip(),
+        T.RandomVerticalFlip(p=0.1),
         T.RandomGrayscale(),
         T.ToTensor(),
         AddGaussianNoise(std=0.01)
@@ -90,12 +125,12 @@ def main(args):
     val_sampler = SubsetRandomSampler(val_idx)
 
     # Check if the batches are balanced-ish
-    # counts = [0]*len(train_ds.classes)
-    # for j in range(10):
-    #     for i in train_sampler:
-    #         l = train_ds.targets[i]
-    #         counts[l] += 1
-    # print("Counts :", counts)
+    counts = [0]*len(train_ds.classes)
+    for j in range(10):
+        for i in train_sampler:
+            l = train_ds.targets[i]
+            counts[l] += 1
+    print("Sampling Counts :", counts)
 
     train_loader = DataLoader(dataset=train_ds, batch_size=args.batch, sampler=train_sampler,
             num_workers=args.workers, persistent_workers=(True if args.workers > 0 else False),
@@ -114,8 +149,10 @@ def main(args):
     trainer = pl.Trainer(
         accumulate_grad_batches=args.accumulate,
         benchmark=args.benchmark,  # cudnn.benchmark
+        callbacks=callbacks,
         deterministic=True,  # cudnn.deterministic
         gpus=args.ngpu,
+        logger=logger,
         precision=args.precision,
         progress_bar_refresh_rate=10,
         max_epochs=args.epochs,
