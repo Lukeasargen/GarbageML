@@ -55,8 +55,10 @@ def get_args():
     parser.add_argument('--early_stop', default=None, type=str, choices=['loss', 'acc'])
     parser.add_argument('--early_stop_patience', default=20, type=int)
     # Augmentations
+    parser.add_argument('--val_interval', default=5, type=int)
     parser.add_argument('--cutmix', default=0, type=float)
     parser.add_argument('--aug_scale', default=0.08, type=float)
+    parser.add_argument('--label_smoothing', default=0.0, type=float)
     args = parser.parse_args()
     return args
 
@@ -100,9 +102,9 @@ def main(args):
             T.RandomAffine(degrees=10, shear=15),
             T.RandomRotation(degrees=15)
         ]),
-        T.ColorJitter(brightness=0.16, contrast=0.15, saturation=0.5, hue=0.04),
+        T.ColorJitter(brightness=0.16, contrast=0.15, saturation=0.5, hue=0.08),
         T.RandomHorizontalFlip(),
-        T.RandomVerticalFlip(p=0.1),
+        T.RandomVerticalFlip(),
         T.RandomGrayscale(),
         T.ToTensor(),
         AddGaussianNoise(std=0.01)
@@ -150,11 +152,12 @@ def main(args):
         accumulate_grad_batches=args.accumulate,
         benchmark=args.benchmark,  # cudnn.benchmark
         callbacks=callbacks,
+        check_val_every_n_epoch=args.val_interval,
         deterministic=True,  # cudnn.deterministic
         gpus=args.ngpu,
         logger=logger,
         precision=args.precision,
-        progress_bar_refresh_rate=10,
+        progress_bar_refresh_rate=1,
         max_epochs=args.epochs,
     )
 

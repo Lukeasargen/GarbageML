@@ -121,4 +121,18 @@ python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch
 version 10 - exp
 python train.py --root=data/full448 --workers=6 --split=0.2 --epochs=200 --batch=128 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=exp --lr_gamma=0.978 --model=shufflenet_v2_x1_0
 
+deafults/v4 batch=256 -> acc=79.56
+python train.py --root=data/full448 --seed=42 --workers=10 --split=0.2 --model=shufflenet_v2_x0_5 --epochs=100 --batch=256 --opt=adamw --lr=4e-3 --weight_decay=1e-5 --scheduler=step --milestones 60 90 --lr_gamma=0.2 --cutmix=1.0
+deafults/v5 batch=512 -> acc=74.68
+python train.py --root=data/full448 --seed=42 --workers=10 --split=0.2 --model=shufflenet_v2_x0_5 --epochs=100 --batch=512 --opt=adamw --lr=4e-3 --weight_decay=1e-5 --scheduler=step --milestones 60 90 --lr_gamma=0.2 --cutmix=1.0
+
+deafults/v6 batch=256 -> acc=77.61
+python train.py --root=data/full448 --seed=42 --workers=10 --split=0.2 --model=shufflenet_v2_x0_5 --epochs=100 --batch=256 --opt=adamw --lr=4e-3 --weight_decay=1e-5 --scheduler=step --milestones 60 90 --lr_gamma=0.2 --cutmix=1.0 --label_smoothing=0.1
+
+deafults/v7 batch=256 vertical flip=0.5 -> acc=77.49
+python train.py --root=data/full448 --seed=42 --workers=10 --split=0.2 --model=shufflenet_v2_x0_5 --epochs=100 --batch=256 --opt=adamw --lr=4e-3 --weight_decay=1e-5 --scheduler=step --milestones 60 90 --lr_gamma=0.2 --val_interval=1 --cutmix=1.0 --label_smoothing=0.1
+deafults/v8 batch=128 -> acc=74.06
+python train.py --root=data/full448 --seed=42 --workers=10 --split=0.2 --model=shufflenet_v2_x0_5 --epochs=80 --batch=128 --opt=adamw --lr=4e-3 --weight_decay=1e-5 --scheduler=step --milestones 40 70 --lr_gamma=0.2 --val_interval=1 --cutmix=1.0 --label_smoothing=0.1
+deafults/v9 -> acc=74.93
+python train.py --root=data/full448 --seed=42 --workers=10 --split=0.2 --model=shufflenet_v2_x1_0 --epochs=80 --batch=256 --opt=adamw --lr=4e-3 --weight_decay=1e-5 --scheduler=step --milestones 40 70 --lr_gamma=0.2 --val_interval=1 --cutmix=1.0 --label_smoothing=0.1
 

@@ -59,7 +59,7 @@ Dataset link: https://github.com/garythung/trashnet
 
 Stats: 2527 images, 501 glass, 594 paper, 403 cardboard, 482 plastic, 410 metal, 137 trash
 
-I downsampled the images to speed up the image loading pipeine. You can see how that is done in [resize.py](resize.py).
+I downsampled the images to speed up the image loading pipeline. You can see how that is done in [resize.py](resize.py).
 
 Sample of the dataset with labels and predictions (resnet18).
 
@@ -76,7 +76,7 @@ from torchvision.transforms import Normalize
 def get_model(args):
     # args.model is a string
     if callable(models.__dict__[args.model]):
-        m =  models.__dict__[args.model](num_classes=len(args.classes))
+        m =  models.__dict__[args.model](num_classes=args.num_classes, pretrained=args.pretrained)
         norm = Normalize(args.mean, args.std, inplace=True)
         return nn.Sequential(norm, m)
     raise ValueError("Unknown model arg: {}".format(args.model))
@@ -94,7 +94,7 @@ All the arguments:
 --seed=42                   # int, deterministic seed, cudnn.deterministic is always set True by deafult
 --root=data/full            # str, ImageFolder root, REQUIRED
 --name=default              # str, Tensorboard name and log folder name
---workers=0                 # int, Dataloader num_workers, good practice is to use number of cpu cores or less
+--workers=0                 # int, Dataloader num_workers, it's common to use number of cpu cores
 --ngpu=1                    # int, number of gpus to train on
 --benchmark                 # store_true, set cudnn.benchmark
 --precision=32              # int, 32 for full precision and 16 uses pytorch amp
@@ -120,8 +120,10 @@ All the arguments:
 --save_monitor='val_loss'   # str, use val_loss or val_accuracy to find topk models
 --early_stop=None           # str, use loss or acc for callback
 --early_stop_patience=20    # int, patience for the early stop callback
+--val_interval=5            # int, check validation every val_interval epochs
 --cutmix=0                  # float, cutmix beta value, 0 is no cutmix
 --aug_scale=0.08            # float, lower bound for RandomResizedCrop
+--label_smoothing=0.0       # float, label smoothing epsilon value
 ```
 
 This is the tensorboard accruacy graph for 2 resnet18 runs. The dark red is random sampler and the light blue is a imbalance sampler which upsamples the minority classes to make uniform labels in each batch.
@@ -139,7 +141,7 @@ Light blue line, add --imbalance:
 python train.py --root=data/full448 --seed=42 --workers=6 --split=0.2 --epochs=200 --batch=32 --model=resnet18 --opt=adamw --lr=4e-3 --weight_decay=5e-4 --scheduler=step --milestones 150 190 --lr_gamma=0.1 --imbalance
 ```
 
-The imbalance sampling seemed to underperform, but that's complete speculation. But I don't have a statistical sample of runs, just these 2 runs here.
+The imbalance sampling seemed to underperform, but that's complete speculation. I don't have a sample of runs, just these 2 runs here.
 
 
 # Training Methodolgy
@@ -191,4 +193,4 @@ The confusion matrix is done with sklearn.metrics.confusion_matrix and seaborn.h
 
 ![confusion_matrix](/data/readme/confusion_matrix.png)
 
-This matrix tells us more than accuracy, precision, and recall. For instance, the largest of diagonal value is 8. This square tells us that the model gets confused about plastic and glass.
+This matrix tells us more than accuracy, precision, and recall. For instance, the largest off diagonal value is 8. This square tells us that the model gets confused about plastic and glass.

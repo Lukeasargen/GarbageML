@@ -7,11 +7,13 @@ from torchvision.transforms import Normalize
 import pytorch_lightning as pl
 from pytorch_lightning.metrics.functional import accuracy, precision_recall, f1
 
+from util import LabelSmoothing
+
 
 def get_model(args):
     # args.model is a string
     if callable(models.__dict__[args.model]):
-        m = models.__dict__[args.model](num_classes=len(args.classes))
+        m = models.__dict__[args.model](num_classes=args.num_classes)
         norm = Normalize(args.mean, args.std, inplace=True)
         return nn.Sequential(norm, m)
     raise ValueError("Unknown model arg: {}".format(args.model))
@@ -24,6 +26,8 @@ class GarbageModel(pl.LightningModule):
         self.hparams.num_classes = len(self.hparams.classes)
         self.model = get_model(self.hparams)
         self.scheduler = None
+        assert 0 <= self.hparams.label_smoothing < (self.hparams.num_classes-1)/self.hparams.num_classes
+        self.criterion = LabelSmoothing(self.hparams.label_smoothing)
 
     def forward(self, x):
         """ Inference Method Only"""
@@ -50,10 +54,10 @@ class GarbageModel(pl.LightningModule):
             # Adjust the classification loss based on pixel area ratio
             lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (w*h))
             logits = self.model(data)
-            loss = F.cross_entropy(logits, target_a)*lam + F.cross_entropy(logits, target_b)*(1.0-lam)
+            loss = self.criterion(logits, target_a)*lam + self.criterion(logits, target_b)*(1.0-lam)
         else:
             logits = self.model(data)
-            loss = F.cross_entropy(logits, target)
+            loss = self.criterion(logits, target)
         # Metrics
         pred = torch.argmax(logits, dim=1)
         acc = accuracy(pred, target)
