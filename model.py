@@ -5,17 +5,58 @@ from torch.nn import functional as F
 from torchvision import models
 from torchvision.transforms import Normalize
 import pytorch_lightning as pl
-from pytorch_lightning.metrics.functional import accuracy, precision_recall, f1
+from torchmetrics.functional import accuracy, precision_recall, f1
 
 from util import LabelSmoothing
 
 
+class CNN(torch.nn.Module):
+    def __init__(self, features, fc, dropout=0.0):
+        super(CNN, self).__init__()
+        self.features = features
+        self.fc = fc
+        self.dropout = nn.Dropout(dropout)
+        self.pool = nn.AdaptiveAvgPool2d((1,1))
+        self.flatten = nn.Flatten()
+
+    def forward(self, x):
+        x = self.features(x)
+        x = self.pool(x)
+        x = self.dropout(x)
+        x = self.fc(x)
+        x = self.flatten(x)
+        return x
+
+
 def get_model(args):
+    norm = Normalize(args.mean, args.std, inplace=True)
     # args.model is a string
     if callable(models.__dict__[args.model]):
-        m = models.__dict__[args.model](num_classes=args.num_classes)
-        norm = Normalize(args.mean, args.std, inplace=True)
-        return nn.Sequential(norm, m)
+        m = models.__dict__[args.model](pretrained=args.pretrained)
+        # Get model features after pooling
+        if "resnet" in args.model or "resnext" in args.model:
+            layers = list(m.children())[:-2]  # Remove pooling and fc
+        elif "shufflenet" in args.model:
+            layers = list(m.children())[:-1]  # Remove fc
+        elif "squeezenet" in args.model:
+            layers = list(m.children())[:-1]  # Remove classifer
+        elif "densenet" in args.model:
+            layers = list(m.children())[:-1]  # Remove classifer
+        elif "mobilenet_v2" in args.model:
+            layers = list(m.children())[:-1]  # Remove classifer
+        elif "mobilenet_v3" in args.model:
+            layers = list(m.children())[:-2]  # Remove pooling and classifer
+        elif "mnasnet" in args.model:
+            layers = list(m.children())[:-1]  # Remove pooling and classifer
+        else:
+            raise ValueError("Model with pretrained not supported : {}".format(args.model))
+        # Create a fake iamge to get the output dimension
+        fake_img = torch.zeros(1, 3, args.input_size, args.input_size)
+        yhat = nn.Sequential(*layers)(fake_img)
+        _, final_dim, _, _ = yhat.shape
+        features = nn.Sequential(norm, *layers)
+        fc = nn.Conv2d(final_dim, args.num_classes, kernel_size=1, bias=True)
+        return CNN(features, fc, args.dropout)
     raise ValueError("Unknown model arg: {}".format(args.model))
 
 
@@ -36,7 +77,7 @@ class GarbageModel(pl.LightningModule):
     def batch_step(self, batch):
         """ Used in train and validation """
         data, target = batch
-        if self.hparams.cutmix>0 and self.training:
+        if self.training and self.hparams.cutmix>0 and torch.rand(1) < self.hparams.cutmix_prob:
             lam = np.random.beta(self.hparams.cutmix, self.hparams.cutmix)
             rand_index = torch.randperm(data.size()[0]).to(data.device)
             target_a = target
@@ -58,7 +99,7 @@ class GarbageModel(pl.LightningModule):
         else:
             logits = self.model(data)
             loss = self.criterion(logits, target)
-        # Metrics
+
         pred = torch.argmax(logits, dim=1)
         acc = accuracy(pred, target)
         avg_precision, avg_recall = precision_recall(pred, target, num_classes=self.hparams.num_classes,
@@ -78,15 +119,20 @@ class GarbageModel(pl.LightningModule):
         metrics = self.batch_step(batch)
         for k, v in metrics.items():
             key = "{}/train".format(k)
-            val = metrics[k].detach().item()
-            self.logger.experiment.add_scalar(key, val, global_step=self.global_step)
-        return metrics
+            self.log(key, v, on_step=True, on_epoch=True)
 
-    def training_epoch_end(self, outputs):
+        if self.global_step == self.hparams.finetune_after and self.hparams.finetune_after>=0:
+            for param in self.model.parameters():
+                param.requires_grad = True
+        return metrics["loss"]
+
+    # def training_epoch_end(self, outputs):
+        # avg_loss = torch.stack([x["loss"] for x in outputs]).mean().item()
+
         # Add graph to tensorboard
-        if self.current_epoch == 0:
-            sample = torch.rand((1, 3, self.hparams.input_size, self.hparams.input_size), device=self.device)
-            self.logger.experiment.add_graph(self.model, sample)
+        # if self.current_epoch == 0:
+        #     sample = torch.rand((1, 3, self.hparams.input_size, self.hparams.input_size), device=self.device)
+        #     self.logger.experiment.add_graph(self.model, sample)
         
         # Parameter histograms
         # Too long to reload tensorboard, so commented out
@@ -96,29 +142,16 @@ class GarbageModel(pl.LightningModule):
         #         self.logger.experiment.add_histogram(f'{name}.grad', params.grad, self.current_epoch)
         #     except Exception as e:
         #         pass
-
-        # Calculating epoch metrics 
-        for k in outputs[0].keys():
-            key = "{}/train_epoch".format(k)
-            val = torch.stack([x[k] for x in outputs]).mean().detach().item()
-            self.logger.experiment.add_scalar(key, val, global_step=self.current_epoch)
         
     def validation_step(self, batch, batch_idx):
         metrics = self.batch_step(batch)
-        return metrics
-
-    def validation_epoch_end(self, outputs): 
-        # Calculate epoch metrics 
-        for k in outputs[0].keys():
+        for k, v in metrics.items():
             key = "{}/val_epoch".format(k)
-            val = torch.stack([x[k] for x in outputs]).mean().detach().item()
-            self.logger.experiment.add_scalar(key, val, global_step=self.current_epoch)
-            # Use log for the checkpoint callback
-            if k=="loss":
-                avg_loss = val  # For plateau scheduler
-                self.log('val_loss', val)
-            if k=="accuracy":
-                self.log('val_accuracy', val)
+            self.log(key, v, on_step=False, on_epoch=True)
+        return metrics["loss"]
+
+    def validation_epoch_end(self, outputs):
+        avg_loss = torch.stack(outputs).mean().item()
 
         # Log lr
         lr = self.optimizers().param_groups[0]['lr']
@@ -135,7 +168,7 @@ class GarbageModel(pl.LightningModule):
     def configure_optimizers(self):
 
         """https://discuss.pytorch.org/t/weight-decay-in-the-optimizers-is-a-bad-idea-especially-with-batchnorm/16994/3"""
-        def add_weight_decay(module, weight_decay):
+        def add_weight_decay(module, weight_decay, lr):
             decay = []
             no_decay = []
             for name, param in module.named_parameters():
@@ -144,13 +177,26 @@ class GarbageModel(pl.LightningModule):
                         no_decay.append(param)
                     else:
                         decay.append(param)
-            return [{'params': no_decay, 'weight_decay': 0.0},
-                    {'params': decay, 'weight_decay': weight_decay}]
+            return [{'params': no_decay, 'lr': lr,  'weight_decay': 0.0},
+                    {'params': decay, 'lr': lr, 'weight_decay': weight_decay}]
 
-        if self.hparams.weight_decay != 0:
-            params = add_weight_decay(self.model, self.hparams.weight_decay)
+        if self.hparams.pretrained:
+            if self.hparams.weight_decay != 0:
+                params = add_weight_decay(self.model.fc, self.hparams.weight_decay, self.hparams.lr)
+                # Don't weight decay on pretrained weights
+                params += add_weight_decay(self.model.features, self.hparams.weight_decay, self.hparams.finetune_lr)
+            else:
+                params = [{'params': self.model.fc.parameters(), 'lr': self.hparams.lr},
+                          {'params': self.model.features.parameters(), 'lr': self.hparams.finetune_lr}]
+            # Pretrained weights are frozen until finetune_after
+            for param in self.model.features.parameters():
+                param.requires_grad = False
         else:
-            params = self.model.parameters()
+            # Not pretrained so all weights use the same hyperparameters
+            if self.hparams.weight_decay != 0:
+                params = add_weight_decay(self.model, self.hparams.weight_decay, self.hparams.lr)
+            else:
+                params = self.model.parameters()
 
         if self.hparams.opt == 'sgd':
             optimizer = torch.optim.SGD(params, lr=self.hparams.lr, momentum=self.hparams.momentum,
@@ -163,7 +209,7 @@ class GarbageModel(pl.LightningModule):
         if self.hparams.scheduler == 'step':
             self.scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=self.hparams.milestones, gamma=self.hparams.lr_gamma)
         elif self.hparams.scheduler == 'plateau':
-            self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=self.hparams.lr_gamma, patience=self.hparams.patience, verbose=True)
+            self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=self.hparams.lr_gamma, patience=self.hparams.plateau_patience, verbose=False)
         elif self.hparams.scheduler == 'exp':
             self.scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=self.hparams.lr_gamma)
 

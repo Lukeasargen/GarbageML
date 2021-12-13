@@ -18,6 +18,9 @@ from util import AddGaussianNoise
 
 
 def get_args():
+    # For plateau, early loss, checkpointing
+    metrics_choices = ["loss", "accuracy", "average_precision", "average_recall", "weighted_f1"]
+
     parser = argparse.ArgumentParser()
     # Init and setup
     parser.add_argument('--seed', type=int)
@@ -36,6 +39,10 @@ def get_args():
     # Model parameters
     parser.add_argument('--model', default='shufflenet_v2_x0_5', type=str)
     parser.add_argument('--input_size', default=224, type=int)
+    parser.add_argument('--pretrained', default=False, action='store_true')
+    parser.add_argument('--finetune_lr', default=1e-6, type=float)
+    parser.add_argument('--finetune_after', default=-1, type=float)
+    parser.add_argument('--dropout', default=0.0, type=float)
     # Optimizer
     parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--opt', default='adam', type=str, choices=['sgd', 'adam', 'adamw'])
@@ -49,14 +56,17 @@ def get_args():
     parser.add_argument('--lr_gamma', default=0.2, type=float)
     parser.add_argument('--milestones', nargs='+', default=[10, 15], type=int)
     parser.add_argument('--plateau_patience', default=20, type=int)
+    parser.add_argument('--plateau_monitor', default='loss', type=str, choices=metrics_choices)
     # Callbacks
+    parser.add_argument('--val_interval', default=1, type=int)
+    parser.add_argument('--val_percent', default=1.0, type=float)
     parser.add_argument('--save_top_k', default=1, type=int)
-    parser.add_argument('--save_monitor', default='val_loss', type=str, choices=['val_loss', 'val_accuracy'])
-    parser.add_argument('--early_stop', default=None, type=str, choices=['loss', 'acc'])
+    parser.add_argument('--save_monitor', default='accuracy', type=str, choices=metrics_choices)
+    parser.add_argument('--early_stop', default=None, type=str, choices=metrics_choices)
     parser.add_argument('--early_stop_patience', default=20, type=int)
     # Augmentations
-    parser.add_argument('--val_interval', default=5, type=int)
     parser.add_argument('--cutmix', default=0, type=float)
+    parser.add_argument('--cutmix_prob', default=0.5, type=float)
     parser.add_argument('--aug_scale', default=0.08, type=float)
     parser.add_argument('--label_smoothing', default=0.0, type=float)
     args = parser.parse_args()
@@ -74,20 +84,25 @@ def main(args):
     
     callbacks = [
         ModelCheckpoint(
-            monitor=args.save_monitor,
+            monitor=args.save_monitor+"/val_epoch",
             dirpath=dirpath,
-            filename='{epoch:d}-{step}-{val_accuracy:.4f}',
+            filename="topk/{epoch:d}-{step}-{accuracy/val_epoch:.4f}",
             save_top_k=args.save_top_k,
-            mode='min' if args.save_monitor=='val_loss' else 'max',
+            mode='min' if args.save_monitor=='loss' else 'max',
             period=1,  # Check every validation epoch
             save_last=True,
+            save_on_train_epoch_end=False,
         )
     ]
 
-    if args.early_stop == 'acc':
-        callbacks.append(EarlyStopping(monitor='val_accuracy', patience=args.early_stop_patience, mode='max'))
-    if args.early_stop == 'loss':
-        callbacks.append(EarlyStopping(monitor='val_loss', patience=args.early_stop_patience, mode='min'))
+    if args.early_stop is not None:
+        callbacks.append(
+            EarlyStopping(
+                monitor=args.early_stop+"/val_epoch",
+                patience=args.early_stop_patience,
+                mode='min' if args.early_stop=='loss' else 'max',
+            )
+        )
 
     # Setup transforms
     valid_transform = T.Compose([
@@ -98,11 +113,11 @@ def main(args):
     train_transform = T.Compose([
         T.RandomResizedCrop(args.input_size, scale=(args.aug_scale, 1.0)),
         T.RandomChoice([
-            T.RandomPerspective(distortion_scale=0.5, p=1),
+            T.RandomPerspective(distortion_scale=0.2, p=1),
             T.RandomAffine(degrees=10, shear=15),
             T.RandomRotation(degrees=15)
         ]),
-        T.ColorJitter(brightness=0.16, contrast=0.15, saturation=0.5, hue=0.08),
+        T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.5, hue=0.1),
         T.RandomHorizontalFlip(),
         T.RandomVerticalFlip(),
         T.RandomGrayscale(),
@@ -146,7 +161,6 @@ def main(args):
     # print(type(y), y.device, y.dtype, y.shape)
 
     model = GarbageModel(**vars(args))
-    print(model.hparams)
 
     trainer = pl.Trainer(
         accumulate_grad_batches=args.accumulate,
@@ -159,6 +173,9 @@ def main(args):
         precision=args.precision,
         progress_bar_refresh_rate=1,
         max_epochs=args.epochs,
+        num_sanity_val_steps=0,
+        limit_val_batches=args.val_percent,
+        log_every_n_steps=1,
     )
 
     trainer.fit(

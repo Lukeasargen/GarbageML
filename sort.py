@@ -10,7 +10,7 @@ from model import GarbageModel
 from util import pil_loader, prepare_image, make_ensemble
 
 
-def sort_folder(model, device, root, num=None):
+def sort_folder(model, device, root, num=None, multicrop=False, input_size=None):
     print(" * Sorting folder : {} ...".format(root))
     # Create folders for categories
     class_folder_paths = []  # Absolute path to destination folder
@@ -27,24 +27,36 @@ def sort_folder(model, device, root, num=None):
     max_count = min(num, len(images))
     print(" * Sorting {} ...".format(max_count))
     counts = [0]*len(model.classes)
-    valid_transform = T.Compose([
-        T.Resize(model.input_size),
-        T.FiveCrop(model.input_size),
-        # T.TenCrop(model.input_size),
-        T.Lambda(lambda crops: torch.stack([T.ToTensor()(crop) for crop in crops])),
-    ])
+
+    if input_size is None:
+        # If no size is given, use the training size
+        input_size = model.input_size
+
+    if multicrop:
+        valid_transform = T.Compose([
+            T.Resize(int(1.1*input_size)),
+            T.FiveCrop(input_size),
+            # T.TenCrop(input_size),
+            T.Lambda(lambda crops: torch.stack([T.ToTensor()(crop) for crop in crops])),
+        ])
     start_time = time.time()
     for i in range(max_count):
         img_color = pil_loader(images[i])
 
-        # img = prepare_image(img_color, model.input_size).to(device)
+        if multicrop:
+            img = valid_transform(img_color).to(device)
+            ncrops, c, h, w = img.size()
+            img = img.view(-1, c, h, w)        
+        else:
+            img = prepare_image(img_color, input_size).to(device)
 
-        img = valid_transform(img_color).to(device)
-        ncrops, c, h, w = img.size()
-        img = img.view(-1, c, h, w)
-
-        yclass = model(img)
-        yclass = yclass.view(ncrops, -1).mean(0)
+        with torch.no_grad():
+            yclass = model(img)
+    
+        if multicrop:
+            yclass = yclass.view(ncrops, -1).mean(0)
+        else:
+            yclass = yclass.reshape(-1)
 
         class_prob, class_num = torch.max(yclass, dim=0)
         counts[int(class_num)] += 1
@@ -60,7 +72,7 @@ def sort_folder(model, device, root, num=None):
             est = t2/count * (max_count-count)
             print("{}/{} images. {:.2f} seconds. {:.2f} images per seconds. {:.2f} seconds remaining.".format(count, max_count, t2, rate, est))
     print("Labels per class :", counts)
-    print("Distribution :", [c/sum(counts) for c in counts])
+    print("Distribution :", [f"{c/sum(counts):.3f}" for c in counts])
     duration = time.time() - start_time
     print(" * Sort Complete")
     print(" * Duration {:.2f} Seconds".format(duration))
@@ -70,11 +82,14 @@ def sort_folder(model, device, root, num=None):
 if __name__ == "__main__":
 
     root = "data/unsorted"
-    num = 1000
+    num = 200
+    multicrop = True  # True, False
+    input_size = 224  # 128, 144, 160, 192, 224, 256, 288, 320, 384, 448
 
     model_paths = [
-        # "lightning_logs/version_2/checkpoints/epoch=199-step=11799.ckpt",
-        "lightning_logs/version_3/checkpoints/epoch=199-step=5999.ckpt",
+        "logs/default/version_23/last.ckpt",
+        "logs/default/version_24/last.ckpt",
+        "logs/default/version_25/last.ckpt",
     ]
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -82,4 +97,4 @@ if __name__ == "__main__":
 
     model = make_ensemble(model_paths, GarbageModel, device)
 
-    sort_folder(model, device, root, num)
+    sort_folder(model, device, root, num, multicrop, input_size)

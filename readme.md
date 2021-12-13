@@ -104,7 +104,10 @@ All the arguments:
 --mean=[]                   # 3 floats, dataset mean, default is imagenet [0.485, 0.456, 0.406]
 --std=[]                    # 3 floats, dataset std, default is imagenet [0.229, 0.224, 0.225]
 --model=resnet18            # str, torchvision model name
+--pretrained                # store_true, only certain models are pretrained by pytorch
 --input_size=224            # int, input square size in pixels
+--finetune_lr=1e-6          # float, learning rate for pretrained weights
+--finetune_after=-1         # float, start updating the pretrained weights after this number of steps
 --epochs=20                 # int, number of epochs
 --opt=adam                  # str, use sgd, adam, or adamw
 --lr=4e-3                   # float, learning rate
@@ -120,7 +123,7 @@ All the arguments:
 --save_monitor='val_loss'   # str, use val_loss or val_accuracy to find topk models
 --early_stop=None           # str, use loss or acc for callback
 --early_stop_patience=20    # int, patience for the early stop callback
---val_interval=5            # int, check validation every val_interval epochs
+--val_interval=1            # int, check validation every val_interval epochs
 --cutmix=0                  # float, cutmix beta value, 0 is no cutmix
 --aug_scale=0.08            # float, lower bound for RandomResizedCrop
 --label_smoothing=0.0       # float, label smoothing epsilon value

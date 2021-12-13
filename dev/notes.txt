@@ -1,4 +1,4 @@
-tensorboard --logdir lightning_logs/
+tensorboard --logdir logs/
 
 
 TODO
