@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torchvision.transforms as T
+import numpy as np
 from PIL import Image
 
 
@@ -40,11 +41,10 @@ class AddGaussianNoise(torch.nn.Module):
         self.std = std
         
     def __call__(self, tensor):
-        return tensor + torch.randn(tensor.size()) * self.std
-    
-    def __repr__(self):
-        return self.__class__.__name__ + '(std={1})'.format(self.std)
+        return tensor + torch.randn(tensor.size()) * self.std * np.random.uniform()
 
+    def __repr__(self):
+        return self.__class__.__name__ + f'(std={self.std})'
 
 def pil_loader(path):
     return Image.open(open(path, 'rb')).convert('RGB')
@@ -91,7 +91,7 @@ def make_ensemble(paths, plmodel, device):
         if i==0:  # The first model sets the inputs for the rest
             classes = m.hparams.classes
             input_size = m.hparams.input_size
-        if classes == m.hparams.classes and input_size == m.hparams.input_size:
+        if classes == m.hparams.classes:
             print("Adding {}".format(paths[i]))
             m.to(device)
             emodels.append(m)

@@ -32,6 +32,7 @@ def get_args():
     parser.add_argument('--precision', default=32, type=int, choices=[16, 32])
     # Dataset
     parser.add_argument('--batch', default=16, type=int)
+    parser.add_argument('--accumulate', default=1, type=int)
     parser.add_argument('--split', default=0.1, type=float)
     parser.add_argument('--imbalance', default=False, action='store_true')
     parser.add_argument('--mean', nargs=3, default=[0.485, 0.456, 0.406], type=float)
@@ -43,15 +44,25 @@ def get_args():
     parser.add_argument('--finetune_lr', default=1e-6, type=float)
     parser.add_argument('--finetune_after', default=-1, type=float)
     parser.add_argument('--dropout', default=0.0, type=float)
+    # Attention classifier, add .attn to model name
+    parser.add_argument('--attn_embd', default=512, type=int)
+    parser.add_argument('--attn_dim', default=32, type=int)
+    parser.add_argument('--attn_heads', default=6, type=int)
+    parser.add_argument('--attn_layers', default=1, type=int)
+    parser.add_argument('--attn_ff_multi', default=2, type=int)
+    parser.add_argument('--attn_pos_size', default=2, type=int)
     # Optimizer
-    parser.add_argument('--epochs', default=20, type=int)
+    parser.add_argument('--epochs', default=1000, type=int)
+    parser.add_argument('--max_steps', default=None, type=int)
     parser.add_argument('--opt', default='adam', type=str, choices=['sgd', 'adam', 'adamw'])
     parser.add_argument('--lr', default=4e-3, type=float)
+    parser.add_argument('--lr_warmup_steps', default=0, type=int)
     parser.add_argument('--momentum', default=0.9, type=float)
     parser.add_argument('--nesterov', default=False, action='store_true')
     parser.add_argument('--weight_decay', default=0.0, type=float)
-    parser.add_argument('--accumulate', default=1, type=int)
-    # Scheduler
+    parser.add_argument('--grad_clip', default='norm', type=str, choices=['value', 'norm'])
+    parser.add_argument('--clip_value', default=0, type=float)    
+# Scheduler
     parser.add_argument('--scheduler', default=None, type=str, choices=['step', 'plateau', 'exp'])
     parser.add_argument('--lr_gamma', default=0.2, type=float)
     parser.add_argument('--milestones', nargs='+', default=[10, 15], type=int)
@@ -86,7 +97,7 @@ def main(args):
         ModelCheckpoint(
             monitor=args.save_monitor+"/val_epoch",
             dirpath=dirpath,
-            filename="topk/{epoch:d}-{step}-{accuracy/val_epoch:.4f}",
+            filename="topk_{step}",
             save_top_k=args.save_top_k,
             mode='min' if args.save_monitor=='loss' else 'max',
             period=1,  # Check every validation epoch
@@ -119,10 +130,10 @@ def main(args):
         ]),
         T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.5, hue=0.1),
         T.RandomHorizontalFlip(),
-        T.RandomVerticalFlip(),
-        T.RandomGrayscale(),
+        # T.RandomVerticalFlip(),
+        T.RandomGrayscale(p=0.3),
         T.ToTensor(),
-        AddGaussianNoise(std=0.01)
+        # AddGaussianNoise(std=0.05)
     ])
 
     # Get the datasets
@@ -169,10 +180,13 @@ def main(args):
         check_val_every_n_epoch=args.val_interval,
         deterministic=True,  # cudnn.deterministic
         gpus=args.ngpu,
+        gradient_clip_algorithm=args.grad_clip,
+        gradient_clip_val=args.clip_value,
         logger=logger,
         precision=args.precision,
         progress_bar_refresh_rate=1,
         max_epochs=args.epochs,
+        max_steps=args.max_steps,
         num_sanity_val_steps=0,
         limit_val_batches=args.val_percent,
         log_every_n_steps=1,

@@ -1,3 +1,6 @@
+from collections import OrderedDict
+
+from einops import rearrange
 import numpy as np
 import torch
 from torch import nn
@@ -27,36 +30,131 @@ class CNN(torch.nn.Module):
         x = self.flatten(x)
         return x
 
+class ATTN(torch.nn.Module):
+    def __init__(self, features, attention):
+        super(ATTN, self).__init__()
+        self.features = features
+        self.attention = attention
+        self.flatten = nn.Flatten()
+
+    def forward(self, x):
+        x = self.features(x)
+        x = self.attention(x)
+        x = self.flatten(x)
+        return x
+
+class ResidualAttentionBlock(torch.nn.Module):
+    def __init__(self, embd, dim, heads, ff_multi=0, dropout=0):
+        super(ResidualAttentionBlock, self).__init__()
+        self.heads = heads
+        self.ln = nn.LayerNorm(embd)
+        self.to_qkv = nn.Linear(embd, 3*dim*heads, bias=False)
+        self.attn_out = nn.Linear(dim*heads, embd, bias=False)
+        self.scale_factor = dim ** -0.5
+        self.dropout = nn.Dropout(dropout)
+        self.mlp = None
+        if ff_multi>0:
+            self.mlp = nn.Sequential(OrderedDict([
+                ("in_proj", nn.Linear(embd, embd*ff_multi)),
+                ("gelu", nn.GELU()),
+                ("dropout", nn.Dropout(dropout)),
+                ("out_proj", nn.Linear(embd*ff_multi, embd)),
+                ("dropout", nn.Dropout(dropout)),
+            ]))
+
+    def attention(self, x):
+        # https://github.com/rwightman/pytorch-image-models/blob/master/timm/models/vision_transformer.py#L186
+        qkv = self.to_qkv(x)  # B T 3*D*H
+        qkv = rearrange(qkv, 'b t (k d h) -> k b h t d', k=3, h=self.heads)  # 3 B H T D
+        q, k, v = qkv.unbind(0)  # B H T D
+        dots = torch.einsum('... i d , ... j d -> ... i j', q, k) * self.scale_factor  # B H T T
+        attn = torch.softmax(dots, dim=-1)  # B H T T
+        out = torch.einsum('... i j , ... j d -> ... i d', attn, v)  # B H T T
+        out = rearrange(out, 'b h t d -> b t (h d)')  # B T D*H
+        return self.attn_out(out)  # B T E
+
+    def forward(self, x):
+        # Doing the attention and mlp in parallel
+        norm = self.ln(x)
+        x = x + self.attention(norm)
+        if self.mlp is not None:
+            x = x + self.mlp(norm)
+        x = self.dropout(x)
+        return x
+
+class AttentionClassifier(torch.nn.Module):
+    def __init__(self, embd, dim, heads, layers, num_classes, ff_multi=0, dropout=0, attn_pos_size=2):
+        super(AttentionClassifier, self).__init__()
+        self.blocks = nn.Sequential(*[ResidualAttentionBlock(embd, dim, heads, ff_multi, dropout) for _ in range(layers)])
+        self.out = nn.Linear(embd, num_classes)
+        self.cls_token = nn.Parameter(torch.randn(1, 1, embd))  # B 1 E
+        self.pos_embd = nn.Parameter(torch.randn(1, embd, attn_pos_size, attn_pos_size))  # B E H W, this is the corners of the position embedding
+        self.dropout = nn.Dropout(dropout)
+        # https://github.com/openai/CLIP/blob/main/clip/model.py#L300
+        nn.init.normal_(self.cls_token, std=0.02)
+        nn.init.normal_(self.pos_embd, std=0.01)
+        proj_std, attn_std, fc_std = (embd ** -0.5) * ((2 * layers) ** -0.5), embd ** -0.5, (2 * embd) ** -0.5
+        for block in self.blocks:
+            nn.init.normal_(block.to_qkv.weight, std=attn_std)
+            nn.init.normal_(block.attn_out.weight, std=proj_std)
+            if block.mlp is not None:
+                nn.init.normal_(block.mlp.in_proj.weight, std=fc_std)
+                nn.init.normal_(block.mlp.out_proj.weight, std=fc_std)
+
+    def forward(self, x):
+        n, c, h, w = x.shape
+        pos_embd = F.interpolate(self.pos_embd, size=(h,w), mode='bilinear', align_corners=True)
+        x = x + pos_embd
+        # TODO: mask out tokens
+        x = rearrange(x, 'b c h w -> b (h w) c')
+        x = torch.cat([self.cls_token.expand(n, -1, -1), x], dim=1)  # B (HW+1) C
+        x = self.dropout(x)
+        x = self.blocks(x)
+        out = self.out(x[:,0])
+        return out
 
 def get_model(args):
     norm = Normalize(args.mean, args.std, inplace=True)
-    # args.model is a string
-    if callable(models.__dict__[args.model]):
-        m = models.__dict__[args.model](pretrained=args.pretrained)
+    use_att = False
+    model_name = args.model
+    i = model_name.find("attn")  # Check for attention head
+    if i>0:
+        use_att = True
+        model_name = model_name[:i-1]
+    if callable(models.__dict__[model_name]):
+        m = models.__dict__[model_name](pretrained=args.pretrained)
         # Get model features after pooling
-        if "resnet" in args.model or "resnext" in args.model:
+        if "resnet" in model_name or "resnext" in model_name:
             layers = list(m.children())[:-2]  # Remove pooling and fc
-        elif "shufflenet" in args.model:
+        elif "shufflenet" in model_name:
             layers = list(m.children())[:-1]  # Remove fc
-        elif "squeezenet" in args.model:
+        elif "squeezenet" in model_name:
             layers = list(m.children())[:-1]  # Remove classifer
-        elif "densenet" in args.model:
+        elif "densenet" in model_name:
             layers = list(m.children())[:-1]  # Remove classifer
-        elif "mobilenet_v2" in args.model:
+        elif "mobilenet_v2" in model_name:
             layers = list(m.children())[:-1]  # Remove classifer
-        elif "mobilenet_v3" in args.model:
+        elif "mobilenet_v3" in model_name:
             layers = list(m.children())[:-2]  # Remove pooling and classifer
-        elif "mnasnet" in args.model:
+        elif "mnasnet" in model_name:
             layers = list(m.children())[:-1]  # Remove pooling and classifer
         else:
-            raise ValueError("Model with pretrained not supported : {}".format(args.model))
+            raise ValueError("Model with pretrained not supported : {}".format(model_name))
         # Create a fake iamge to get the output dimension
         fake_img = torch.zeros(1, 3, args.input_size, args.input_size)
         yhat = nn.Sequential(*layers)(fake_img)
         _, final_dim, _, _ = yhat.shape
         features = nn.Sequential(norm, *layers)
-        fc = nn.Conv2d(final_dim, args.num_classes, kernel_size=1, bias=True)
-        return CNN(features, fc, args.dropout)
+        if use_att:
+            if args.attn_embd!=final_dim:
+                features.add_module("proj", nn.Conv2d(final_dim, args.attn_embd, kernel_size=1, bias=False))
+            attention = AttentionClassifier(args.attn_embd, args.attn_dim, args.attn_heads,
+                            args.attn_layers, args.num_classes, args.attn_ff_multi,
+                            args.dropout, args.attn_pos_size)
+            return ATTN(features, attention)
+        else:
+            fc = nn.Conv2d(final_dim, args.num_classes, kernel_size=1, bias=True)
+            return CNN(features, fc, args.dropout)
     raise ValueError("Unknown model arg: {}".format(args.model))
 
 
@@ -66,7 +164,8 @@ class GarbageModel(pl.LightningModule):
         self.save_hyperparameters()
         self.hparams.num_classes = len(self.hparams.classes)
         self.model = get_model(self.hparams)
-        self.scheduler = None
+        self.scheduler = None  # Set in configure_optimizers()
+        self.opt_init_lr = None  # Set in configure_optimizers()
         assert 0 <= self.hparams.label_smoothing < (self.hparams.num_classes-1)/self.hparams.num_classes
         self.criterion = LabelSmoothing(self.hparams.label_smoothing)
 
@@ -109,9 +208,11 @@ class GarbageModel(pl.LightningModule):
         metrics = {
             "loss": loss,  # attached to computation graph, not necessary in validation, but I'm to lazy to fix
             "accuracy": acc,
+            "error": 1-acc,
             "average_precision": avg_precision,
             "average_recall": avg_recall,
             "weighted_f1": weighted_f1,
+            "inv_f1": 1-weighted_f1,
         }
         return metrics
 
@@ -124,6 +225,19 @@ class GarbageModel(pl.LightningModule):
         if self.global_step == self.hparams.finetune_after and self.hparams.finetune_after>=0:
             for param in self.model.parameters():
                 param.requires_grad = True
+
+        if self.trainer.global_step < self.hparams.lr_warmup_steps:
+            opt = self.optimizers()
+            lr_scale = min(1, float(self.trainer.global_step+1)/self.hparams.lr_warmup_steps)
+            for pg, init_lr in zip(opt.param_groups, self.opt_init_lr):
+                pg['lr'] = lr_scale*init_lr
+        elif self.scheduler:
+            if type(self.scheduler) in [torch.optim.lr_scheduler.MultiStepLR, torch.optim.lr_scheduler.ExponentialLR]:
+                self.scheduler.step()
+
+        lr = self.optimizers().param_groups[0]['lr']
+        self.logger.experiment.add_scalar('Learning Rate/step', lr, global_step=self.global_step)
+
         return metrics["loss"]
 
     # def training_epoch_end(self, outputs):
@@ -152,17 +266,12 @@ class GarbageModel(pl.LightningModule):
 
     def validation_epoch_end(self, outputs):
         avg_loss = torch.stack(outputs).mean().item()
-
-        # Log lr
         lr = self.optimizers().param_groups[0]['lr']
         self.logger.experiment.add_scalar('Learning Rate', lr, global_step=self.current_epoch)
-
         # Step scheduler
         if self.scheduler:
             if type(self.scheduler) == torch.optim.lr_scheduler.ReduceLROnPlateau:
                 self.scheduler.step(avg_loss)
-            elif type(self.scheduler) in [torch.optim.lr_scheduler.MultiStepLR, torch.optim.lr_scheduler.ExponentialLR]:
-                self.scheduler.step()
 
 
     def configure_optimizers(self):
@@ -181,13 +290,14 @@ class GarbageModel(pl.LightningModule):
                     {'params': decay, 'lr': lr, 'weight_decay': weight_decay}]
 
         if self.hparams.pretrained:
+            head_layer = self.model.fc if type(self.model)==CNN else self.model.attention
             if self.hparams.weight_decay != 0:
-                params = add_weight_decay(self.model.fc, self.hparams.weight_decay, self.hparams.lr)
+                params = add_weight_decay(head_layer, self.hparams.weight_decay, self.hparams.lr)
                 # Don't weight decay on pretrained weights
                 params += add_weight_decay(self.model.features, self.hparams.weight_decay, self.hparams.finetune_lr)
             else:
-                params = [{'params': self.model.fc.parameters(), 'lr': self.hparams.lr},
-                          {'params': self.model.features.parameters(), 'lr': self.hparams.finetune_lr}]
+                params = [{'params': head_layer.parameters(), 'lr': self.hparams.lr},
+                    {'params': self.model.features.parameters(), 'lr': self.hparams.finetune_lr}]
             # Pretrained weights are frozen until finetune_after
             for param in self.model.features.parameters():
                 param.requires_grad = False
@@ -205,6 +315,9 @@ class GarbageModel(pl.LightningModule):
             optimizer = torch.optim.Adam(params, lr=self.hparams.lr)
         elif self.hparams.opt == 'adamw':
             optimizer = torch.optim.AdamW(params, lr=self.hparams.lr)
+
+        # Keep a copy of the initial lr for each group because this will get overwritten during warmup steps
+        self.opt_init_lr = [pg['lr'] for pg in optimizer.param_groups]
 
         if self.hparams.scheduler == 'step':
             self.scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=self.hparams.milestones, gamma=self.hparams.lr_gamma)
