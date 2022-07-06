@@ -51,7 +51,7 @@ class ResidualAttentionBlock(torch.nn.Module):
         self.to_qkv = nn.Linear(embd, 3*dim*heads, bias=False)
         self.attn_out = nn.Linear(dim*heads, embd, bias=False)
         self.scale_factor = dim ** -0.5
-        self.dropout = nn.Dropout(dropout)
+        self.dropout = nn.Dropout(dropout, inplace=True)
         self.mlp = None
         if ff_multi>0:
             self.mlp = nn.Sequential(OrderedDict([
@@ -83,16 +83,21 @@ class ResidualAttentionBlock(torch.nn.Module):
         return x
 
 class AttentionClassifier(torch.nn.Module):
-    def __init__(self, embd, dim, heads, layers, num_classes, ff_multi=0, dropout=0, attn_pos_size=2):
+    def __init__(self, embd, dim, heads, layers, num_classes,
+                ff_multi=0, dropout=0, attn_pos_size=2,
+                avg_tokens=False):
         super(AttentionClassifier, self).__init__()
         self.blocks = nn.Sequential(*[ResidualAttentionBlock(embd, dim, heads, ff_multi, dropout) for _ in range(layers)])
         self.out = nn.Linear(embd, num_classes)
+        self.attn_pos_size = attn_pos_size
+        if attn_pos_size>1:
+            self.pos_embd = nn.Parameter(torch.randn(1, embd, attn_pos_size, attn_pos_size))  # B E H W, this is the corners of the position embedding
+            nn.init.normal_(self.pos_embd, std=0.01)
+        self.dropout = nn.Dropout(dropout, inplace=True)
         self.cls_token = nn.Parameter(torch.randn(1, 1, embd))  # B 1 E
-        self.pos_embd = nn.Parameter(torch.randn(1, embd, attn_pos_size, attn_pos_size))  # B E H W, this is the corners of the position embedding
-        self.dropout = nn.Dropout(dropout)
-        # https://github.com/openai/CLIP/blob/main/clip/model.py#L300
         nn.init.normal_(self.cls_token, std=0.02)
-        nn.init.normal_(self.pos_embd, std=0.01)
+        self.avg_tokens = avg_tokens
+        # https://github.com/openai/CLIP/blob/main/clip/model.py#L300
         proj_std, attn_std, fc_std = (embd ** -0.5) * ((2 * layers) ** -0.5), embd ** -0.5, (2 * embd) ** -0.5
         for block in self.blocks:
             nn.init.normal_(block.to_qkv.weight, std=attn_std)
@@ -103,11 +108,15 @@ class AttentionClassifier(torch.nn.Module):
 
     def forward(self, x):
         n, c, h, w = x.shape
-        pos_embd = F.interpolate(self.pos_embd, size=(h,w), mode='bilinear', align_corners=True)
-        x = x + pos_embd
+        if self.attn_pos_size>1:
+            pos_embd = F.interpolate(self.pos_embd, size=(h,w), mode='bilinear', align_corners=True)
+            x = x + pos_embd
         # TODO: mask out tokens
         x = rearrange(x, 'b c h w -> b (h w) c')
-        x = torch.cat([self.cls_token.expand(n, -1, -1), x], dim=1)  # B (HW+1) C
+        cls_token = self.cls_token.expand(n, -1, -1)
+        if self.avg_tokens:
+            cls_token = cls_token + x.mean(dim=1, keepdim=True)
+        x = torch.cat([cls_token, x], dim=1)  # B (HW+1) C
         x = self.dropout(x)
         x = self.blocks(x)
         out = self.out(x[:,0])
@@ -150,7 +159,7 @@ def get_model(args):
                 features.add_module("proj", nn.Conv2d(final_dim, args.attn_embd, kernel_size=1, bias=False))
             attention = AttentionClassifier(args.attn_embd, args.attn_dim, args.attn_heads,
                             args.attn_layers, args.num_classes, args.attn_ff_multi,
-                            args.dropout, args.attn_pos_size)
+                            args.dropout, args.attn_pos_size, args.attn_avg_tokens)
             return ATTN(features, attention)
         else:
             fc = nn.Conv2d(final_dim, args.num_classes, kernel_size=1, bias=True)
