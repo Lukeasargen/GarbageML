@@ -50,9 +50,11 @@ def pil_loader(path):
     return Image.open(open(path, 'rb')).convert('RGB')
 
 
-def prepare_image(img, size=None):
+def prepare_image(img, size=None, centercrop=False):
     if size:
-        img = crop_max_square(img, size)
+        img = T.Resize(size, interpolation=T.InterpolationMode.BICUBIC)(img)
+        if centercrop:
+            img = T.CenterCrop(size)(img)
     return T.ToTensor()(img).unsqueeze_(0)
 
 
