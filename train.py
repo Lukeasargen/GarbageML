@@ -51,6 +51,7 @@ def get_args():
     parser.add_argument('--attn_layers', default=1, type=int)
     parser.add_argument('--attn_ff_multi', default=2, type=int)
     parser.add_argument('--attn_pos_size', default=2, type=int)
+    parser.add_argument('--attn_avg_tokens', default=False, action='store_true')
     # Optimizer
     parser.add_argument('--epochs', default=1000, type=int)
     parser.add_argument('--max_steps', default=None, type=int)
@@ -117,12 +118,12 @@ def main(args):
 
     # Setup transforms
     valid_transform = T.Compose([
-        T.Resize(args.input_size),
+        T.Resize(args.input_size, interpolation=T.InterpolationMode.BICUBIC),
         T.CenterCrop(args.input_size),
         T.ToTensor(),
     ])
     train_transform = T.Compose([
-        T.RandomResizedCrop(args.input_size, scale=(args.aug_scale, 1.0)),
+        T.RandomResizedCrop(args.input_size, scale=(args.aug_scale, 1.0), interpolation=T.InterpolationMode.BICUBIC),
         T.RandomChoice([
             T.RandomPerspective(distortion_scale=0.2, p=1),
             T.RandomAffine(degrees=10, shear=15),
@@ -131,9 +132,9 @@ def main(args):
         T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.5, hue=0.1),
         T.RandomHorizontalFlip(),
         # T.RandomVerticalFlip(),
-        T.RandomGrayscale(p=0.3),
+        T.RandomGrayscale(p=0.25),
         T.ToTensor(),
-        # AddGaussianNoise(std=0.05)
+        AddGaussianNoise(std=0.02)
     ])
 
     # Get the datasets
