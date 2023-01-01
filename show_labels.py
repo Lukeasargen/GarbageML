@@ -9,12 +9,12 @@ from model import GarbageModel
 from util import pil_loader, prepare_image
 
 
-root = "data/subset"
+root = r"C:\Users\LUKE_SARGEN\projects\classifier\data\test"
 rows = 3
 cols = 4
 scale = 2.5
 
-model_path = "lightning_logs/version_7/checkpoints/epoch=199-step=11799.ckpt"
+model_path = "logs/subset/version_49/last.ckpt"
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print("Device : {}".format(device))
@@ -22,17 +22,10 @@ print("Device : {}".format(device))
 m = GarbageModel.load_from_checkpoint(model_path, map_location=device)
 m.eval()
 m.freeze()
-input_size = m.hparams.input_size
+input_size = 256  # m.hparams.input_size, 128, 144, 160, 192, 224, 256, 288, 320, 384, 448
+centercrop = False
 classes = m.hparams.classes
 model = m.model.to(device)
-
-normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-transform = T.Compose([
-    T.Resize(input_size),
-    T.CenterCrop(input_size),
-    T.ToTensor(),
-    normalize
-])
 
 sample_ds = ImageFolder(root=root)
 
@@ -43,8 +36,8 @@ for i in range(1, cols*rows+1):
     img_path, y = sample_ds.samples[idxs[i-1]]
     print(i, img_path, classes[int(y)])
     img_color = pil_loader(img_path)
-    img = prepare_image(img_color, input_size)
-    ylogits = model(img.to(device))
+    img = prepare_image(img_color, input_size, centercrop).to(device)
+    ylogits = model(img)
     yclass = torch.softmax(ylogits, dim=1)
     yprob, yhat = torch.max(yclass, dim=1)
 

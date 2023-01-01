@@ -9,21 +9,47 @@ cross validation
 
 
 python train.py
---workers=6 --split=0.2 --epochs=100 --batch=32
+--seed=42
+--root=C:\Users\LUKE_SARGEN\projects\classifier\data\
+--name=subset
+--workers=0
+--ngpu=1
+--benchmark
+--precision=32
+--batch=16
+--accumulate=1
+--split=0.2
 --imbalance
---precision=16
+
+--model=shufflenet_v2_x1_0
+--pretrained
+--input_size=224
+--finetune_lr=1e-6
+--finetune_after=1000
+--epochs=20
+
+--attn_embd=512
+--attn_dim=32
+--attn_heads=8
+--attn_layers=1
+--attn_ff_multi=2
 
 --opt=sgd --lr=1e-1 --weight_decay=5e-4 --momentum=0.9 --nesterov
 --opt=adam --lr=4e-3
 --opt=adamw --lr=4e-3 --weight_decay=5e-4
---accumulate=1
-
+--lr_warmup_steps=0
 --scheduler=step --milestones 100 150 --lr_gamma=0.1
 --scheduler=exp --lr_gamma=0.95
 --scheduler=plateau --plateau_patience 10 --lr_gamma=0.8
 
---early_stop=loss
---early_stop_patience=20
+--early_stop=loss --early_stop_patience=20
+
+--save_top_k=1 --save_monitor=accuracy
+--val_interval=1
+
+--cutmix=1.0
+--aug_scale=0.08
+--label_smoothing=0.1
 
 
 Dataset image size

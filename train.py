@@ -1,8 +1,9 @@
-from logging import log
-import os
 import argparse
+from collections import Counter
+import os
 
 from sklearn.model_selection import train_test_split
+import torch
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler
 from torchvision.datasets import ImageFolder
@@ -34,7 +35,8 @@ def get_args():
     parser.add_argument('--batch', default=16, type=int)
     parser.add_argument('--accumulate', default=1, type=int)
     parser.add_argument('--split', default=0.1, type=float)
-    parser.add_argument('--imbalance', default=False, action='store_true')
+    parser.add_argument('--imbalance_oversample', default=False, action='store_true')
+    parser.add_argument('--imbalance_weights', default=False, action='store_true')
     parser.add_argument('--mean', nargs=3, default=[0.485, 0.456, 0.406], type=float)
     parser.add_argument('--std', nargs=3, default=[0.229, 0.224, 0.225], type=float)
     # Model parameters
@@ -124,15 +126,16 @@ def main(args):
     ])
     train_transform = T.Compose([
         T.RandomResizedCrop(args.input_size, scale=(args.aug_scale, 1.0), interpolation=T.InterpolationMode.BICUBIC),
-        T.RandomChoice([
-            T.RandomPerspective(distortion_scale=0.2, p=1),
-            T.RandomAffine(degrees=10, shear=15),
-            T.RandomRotation(degrees=15)
-        ]),
+        # T.RandomChoice([
+        #     T.RandomPerspective(distortion_scale=0.2, p=1),
+        #     T.RandomAffine(degrees=10, shear=15),
+        #     T.RandomRotation(degrees=15)
+        # ]),
+        T.RandomPerspective(distortion_scale=0.2, p=0.5),
         T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.5, hue=0.1),
         T.RandomHorizontalFlip(),
         # T.RandomVerticalFlip(),
-        T.RandomGrayscale(p=0.25),
+        T.RandomGrayscale(p=0.2),
         T.ToTensor(),
         AddGaussianNoise(std=0.02)
     ])
@@ -147,7 +150,7 @@ def main(args):
     print("Split: Total={}, Train={}, Val={}.".format(len(train_ds), len(train_idx), len(val_idx)))
 
     # Get Dataset and Dataloaders
-    if args.imbalance:
+    if args.imbalance_oversample:
         train_sampler = ImbalancedSampler(train_ds, train_idx)
     else:
         train_sampler = SubsetRandomSampler(train_idx)
@@ -160,6 +163,11 @@ def main(args):
             l = train_ds.targets[i]
             counts[l] += 1
     print("Sampling Counts :", counts)
+
+    class_weights = torch.Tensor(list(Counter(train_ds.targets).values()))
+    class_weights = sum(class_weights)/(len(class_weights)*class_weights)
+    args.class_weights = class_weights
+    print("Class Weights :", class_weights)
 
     train_loader = DataLoader(dataset=train_ds, batch_size=args.batch, sampler=train_sampler,
             num_workers=args.workers, persistent_workers=(True if args.workers > 0 else False),

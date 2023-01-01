@@ -10,7 +10,7 @@ from model import GarbageModel
 from util import pil_loader, prepare_image, make_ensemble
 
 
-def sort_folder(model, device, root, num=None, multicrop=False, input_size=None):
+def sort_folder(model, device, root, num=None, multicrop=False, input_size=None, centercrop=False):
     print(" * Sorting folder : {} ...".format(root))
     # Create folders for categories
     class_folder_paths = []  # Absolute path to destination folder
@@ -34,7 +34,7 @@ def sort_folder(model, device, root, num=None, multicrop=False, input_size=None)
 
     if multicrop:
         valid_transform = T.Compose([
-            T.Resize(int(1.1*input_size)),
+            T.Resize(int(1.05*input_size)),
             T.FiveCrop(input_size),
             # T.TenCrop(input_size),
             T.Lambda(lambda crops: torch.stack([T.ToTensor()(crop) for crop in crops])),
@@ -48,7 +48,7 @@ def sort_folder(model, device, root, num=None, multicrop=False, input_size=None)
             ncrops, c, h, w = img.size()
             img = img.view(-1, c, h, w)        
         else:
-            img = prepare_image(img_color, input_size).to(device)
+            img = prepare_image(img_color, input_size, centercrop).to(device)
 
         with torch.no_grad():
             yclass = model(img)
@@ -61,35 +61,46 @@ def sort_folder(model, device, root, num=None, multicrop=False, input_size=None)
         class_prob, class_num = torch.max(yclass, dim=0)
         counts[int(class_num)] += 1
         try:
+            # if int(class_num)!=1: # 0=mmmm, 1=nah, 2=nnnn, 3=oooo, 4=qqqq
+            # if int(class_num)==2:
             move(images[i], class_folder_paths[int(class_num)])
         except:
             print("Failed to move {}".format(images[i]))
 
+        count = i+1
         if (i+1) % 50 == 0:
-            count = i+1
             t2 = time.time() - start_time
             rate = count/t2
             est = t2/count * (max_count-count)
             print("{}/{} images. {:.2f} seconds. {:.2f} images per seconds. {:.2f} seconds remaining.".format(count, max_count, t2, rate, est))
-    print("Labels per class :", counts)
-    print("Distribution :", [f"{c/sum(counts):.3f}" for c in counts])
+
     duration = time.time() - start_time
+    rate = count/duration
+    est = duration/count * (max_count-count)
+    print("{}/{} images. {:.2f} seconds. {:.2f} images per seconds. {:.2f} seconds remaining.".format(count, max_count, duration, rate, est))
     print(" * Sort Complete")
     print(" * Duration {:.2f} Seconds".format(duration))
     print(" * {:.2f} Images per Second".format(max_count/duration))
 
+    lw = len(max(model.classes, key=lambda x: len(x)))
+    print(f'{"Label":>{lw}s}: {"Count":>6} {"Perc":>6}')
+    for l, p in zip(model.classes, counts):
+        print(f'{l:>{lw}s}: {p:>6.0f} {100*p/sum(counts):>6.2f}')
+
 
 if __name__ == "__main__":
 
-    root = "data/unsorted"
-    num = 200
-    multicrop = True  # True, False
-    input_size = 224  # 128, 144, 160, 192, 224, 256, 288, 320, 384, 448
+    root = r"C:\Users\LUKE_SARGEN\projects\classifier\data\unsorted"
+    num = 1000
+    multicrop = False  # True, False
+    input_size = 256  # 128, 144, 160, 192, 224, 256, 288, 320, 384, 448
+    centercrop = False
 
     model_paths = [
-        "logs/default/version_23/last.ckpt",
-        "logs/default/version_24/last.ckpt",
-        "logs/default/version_25/last.ckpt",
+        # "logs/subset/version_65/last.ckpt",  # mobilenet_v3_small.attn, 256* 320 384*
+        # "logs/subset/version_66/last.ckpt",  # mobilenet_v3_small.attn, 256* 320 384*
+        # "logs/subset/version_67/last.ckpt",  # mobilenet_v3_small.attn, 256* 320 384 448*
+        "logs/subset/version_70/last.ckpt",  # mobilenet_v3_small.attn, 288*
     ]
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -97,4 +108,4 @@ if __name__ == "__main__":
 
     model = make_ensemble(model_paths, GarbageModel, device)
 
-    sort_folder(model, device, root, num, multicrop, input_size)
+    sort_folder(model, device, root, num, multicrop, input_size, centercrop)

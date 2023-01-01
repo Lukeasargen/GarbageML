@@ -10,9 +10,6 @@ from torchvision.transforms import Normalize
 import pytorch_lightning as pl
 from torchmetrics.functional import accuracy, precision_recall, f1
 
-from util import LabelSmoothing
-
-
 class CNN(torch.nn.Module):
     def __init__(self, features, fc, dropout=0.0):
         super(CNN, self).__init__()
@@ -69,35 +66,34 @@ class ResidualAttentionBlock(torch.nn.Module):
         q, k, v = qkv.unbind(0)  # B H T D
         dots = torch.einsum('... i d , ... j d -> ... i j', q, k) * self.scale_factor  # B H T T
         attn = torch.softmax(dots, dim=-1)  # B H T T
-        out = torch.einsum('... i j , ... j d -> ... i d', attn, v)  # B H T T
+        out = torch.einsum('... i j , ... j d -> ... i d', attn, v)  # B H T D
         out = rearrange(out, 'b h t d -> b t (h d)')  # B T D*H
-        return self.attn_out(out)  # B T E
+        return self.attn_out(out), attn  # B T E
 
     def forward(self, x):
         # Doing the attention and mlp in parallel
-        norm = self.ln(x)
-        x = x + self.attention(norm)
+        residual, attn = self.attention(x)
         if self.mlp is not None:
-            x = x + self.mlp(norm)
-        x = self.dropout(x)
-        return x
+            residual = residual + self.mlp(x)
+        residual = self.dropout(residual)
+        return self.ln(x + residual)
 
 class AttentionClassifier(torch.nn.Module):
     def __init__(self, embd, dim, heads, layers, num_classes,
                 ff_multi=0, dropout=0, attn_pos_size=2,
                 avg_tokens=False):
         super(AttentionClassifier, self).__init__()
+        self.input_norm = nn.LayerNorm(embd)
         self.blocks = nn.Sequential(*[ResidualAttentionBlock(embd, dim, heads, ff_multi, dropout) for _ in range(layers)])
         self.out = nn.Linear(embd, num_classes)
-        self.attn_pos_size = attn_pos_size
-        if attn_pos_size>1:
-            self.pos_embd = nn.Parameter(torch.randn(1, embd, attn_pos_size, attn_pos_size))  # B E H W, this is the corners of the position embedding
-            nn.init.normal_(self.pos_embd, std=0.01)
-        self.dropout = nn.Dropout(dropout, inplace=True)
         self.cls_token = nn.Parameter(torch.randn(1, 1, embd))  # B 1 E
-        nn.init.normal_(self.cls_token, std=0.02)
+        self.pos_embd = nn.Parameter(torch.randn(1, embd, attn_pos_size, attn_pos_size))  # B E H W, this is the corners of the position embedding
+        self.dropout = nn.Dropout(dropout)
         self.avg_tokens = avg_tokens
+        self.embd_scale = embd ** -0.5
         # https://github.com/openai/CLIP/blob/main/clip/model.py#L300
+        nn.init.normal_(self.cls_token, std=0.02)
+        nn.init.normal_(self.pos_embd, std=0.01)
         proj_std, attn_std, fc_std = (embd ** -0.5) * ((2 * layers) ** -0.5), embd ** -0.5, (2 * embd) ** -0.5
         for block in self.blocks:
             nn.init.normal_(block.to_qkv.weight, std=attn_std)
@@ -106,18 +102,24 @@ class AttentionClassifier(torch.nn.Module):
                 nn.init.normal_(block.mlp.in_proj.weight, std=fc_std)
                 nn.init.normal_(block.mlp.out_proj.weight, std=fc_std)
 
-    def forward(self, x):
+    def features_to_tokens(self, x):
         n, c, h, w = x.shape
-        if self.attn_pos_size>1:
-            pos_embd = F.interpolate(self.pos_embd, size=(h,w), mode='bilinear', align_corners=True)
-            x = x + pos_embd
-        # TODO: mask out tokens
+        pos_embd = F.interpolate(self.pos_embd, size=(h,w), mode='bilinear', align_corners=True)
+        pos_embd = rearrange(pos_embd, 'b c h w -> b (h w) c')
         x = rearrange(x, 'b c h w -> b (h w) c')
-        cls_token = self.cls_token.expand(n, -1, -1)
+        # TODO: mask out tokens like dropout
         if self.avg_tokens:
-            cls_token = cls_token + x.mean(dim=1, keepdim=True)
-        x = torch.cat([cls_token, x], dim=1)  # B (HW+1) C
-        x = self.dropout(x)
+            x = torch.cat([x.mean(dim=1, keepdim=True), x], dim=1)  # B (HW+1) C
+            pos_embd = torch.cat([self.cls_token, pos_embd], dim=1)  # 1 (HW+1) C
+        else:
+            x = torch.cat([self.cls_token.expand(n, -1, -1), x], dim=1)  # B (HW+1) C
+            pos_embd = torch.cat([torch.zeros(1, 1, c, device=x.device), pos_embd], dim=1)  # 1 (HW+1) C
+        x = x + pos_embd*self.embd_scale
+        return x
+
+    def forward(self, x):
+        x = self.features_to_tokens(x)
+        x = self.input_norm(x)
         x = self.blocks(x)
         out = self.out(x[:,0])
         return out
@@ -149,11 +151,12 @@ def get_model(args):
             layers = list(m.children())[:-1]  # Remove pooling and classifer
         else:
             raise ValueError("Model with pretrained not supported : {}".format(model_name))
-        # Create a fake iamge to get the output dimension
-        fake_img = torch.zeros(1, 3, args.input_size, args.input_size)
-        yhat = nn.Sequential(*layers)(fake_img)
-        _, final_dim, _, _ = yhat.shape
+        layers.append(nn.Dropout(args.dropout))  # Dropout on the features
         features = nn.Sequential(norm, *layers)
+        # Create a fake image to get the output dimension
+        fake_img = torch.zeros(1, 3, args.input_size, args.input_size)
+        yhat = features(fake_img)
+        _, final_dim, _, _ = yhat.shape
         if use_att:
             if args.attn_embd!=final_dim:
                 features.add_module("proj", nn.Conv2d(final_dim, args.attn_embd, kernel_size=1, bias=False))
@@ -175,8 +178,12 @@ class GarbageModel(pl.LightningModule):
         self.model = get_model(self.hparams)
         self.scheduler = None  # Set in configure_optimizers()
         self.opt_init_lr = None  # Set in configure_optimizers()
+        self.cross_entropy = nn.CrossEntropyLoss()
         assert 0 <= self.hparams.label_smoothing < (self.hparams.num_classes-1)/self.hparams.num_classes
-        self.criterion = LabelSmoothing(self.hparams.label_smoothing)
+        self.criterion = nn.CrossEntropyLoss(
+            weight=self.hparams.class_weights if self.hparams.imbalance_weights else None,
+            label_smoothing=self.hparams.label_smoothing
+        )
 
     def forward(self, x):
         """ Inference Method Only"""
@@ -208,6 +215,7 @@ class GarbageModel(pl.LightningModule):
             logits = self.model(data)
             loss = self.criterion(logits, target)
 
+        cross_entropy = self.cross_entropy(logits, target)
         pred = torch.argmax(logits, dim=1)
         acc = accuracy(pred, target)
         avg_precision, avg_recall = precision_recall(pred, target, num_classes=self.hparams.num_classes,
@@ -222,6 +230,7 @@ class GarbageModel(pl.LightningModule):
             "average_recall": avg_recall,
             "weighted_f1": weighted_f1,
             "inv_f1": 1-weighted_f1,
+            "cross_entropy": cross_entropy,
         }
         return metrics
 
@@ -231,7 +240,7 @@ class GarbageModel(pl.LightningModule):
             key = "{}/train".format(k)
             self.log(key, v, on_step=True, on_epoch=True)
 
-        if self.global_step == self.hparams.finetune_after and self.hparams.finetune_after>=0:
+        if self.global_step==self.hparams.finetune_after and self.hparams.finetune_after>=0:
             for param in self.model.parameters():
                 param.requires_grad = True
 
